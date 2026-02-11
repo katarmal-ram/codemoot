@@ -1,0 +1,11 @@
+{
+  "name": "@codemoot/web",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "echo 'Web UI build - Sprint 3'",
+    "typecheck": "echo 'Web UI typecheck - Sprint 3'",
+    "clean": "rm -rf dist"
+  }
+}

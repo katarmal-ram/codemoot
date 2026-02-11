@@ -1,0 +1,50 @@
+{
+  "name": "@codemoot/mcp-server",
+  "version": "0.2.0",
+  "description": "MCP server for multi-model AI code review, planning, debate, and memory (experimental)",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/katarmal-ram/codemoot.git",
+    "directory": "packages/mcp-server"
+  },
+  "homepage": "https://github.com/katarmal-ram/codemoot#readme",
+  "bugs": "https://github.com/katarmal-ram/codemoot/issues",
+  "keywords": ["mcp", "ai", "code-review", "multi-model", "model-context-protocol"],
+  "engines": { "node": ">=20.0.0" },
+  "files": ["dist"],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "codemoot-mcp": "./dist/index.js"
+  },
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "tsx tests/e2e-harness.ts",
+    "test:e2e:quick": "tsx tests/e2e-harness.ts --quick",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@codemoot/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

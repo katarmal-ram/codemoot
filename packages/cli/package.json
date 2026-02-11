@@ -1,0 +1,40 @@
+{
+  "name": "@codemoot/cli",
+  "version": "0.2.0",
+  "description": "CLI for multi-model AI collaboration — review, debate, fix, watch, and ship code with Claude + GPT",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/katarmal-ram/codemoot.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/katarmal-ram/codemoot#readme",
+  "bugs": "https://github.com/katarmal-ram/codemoot/issues",
+  "keywords": ["ai", "cli", "code-review", "multi-model", "orchestration", "codex", "claude", "debate", "autofix"],
+  "engines": { "node": ">=20.0.0" },
+  "files": ["dist"],
+  "bin": {
+    "codemoot": "./dist/index.js"
+  },
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@codemoot/core": "workspace:*",
+    "chalk": "^5.4.0",
+    "chokidar": "^5.0.0",
+    "commander": "^13.0.0",
+    "inquirer": "^12.0.0",
+    "ora": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,28 @@
+# cli-first preset — $0 via codex/gemini CLI, no API keys needed
+models:
+  codex-architect:
+    provider: openai
+    model: gpt-5.3-codex
+    apiKeyEnv: OPENAI_API_KEY
+    maxTokens: 4096
+    temperature: 0.7
+    timeout: 120
+    providerMode: cli
+  codex-reviewer:
+    provider: openai
+    model: gpt-5.3-codex
+    apiKeyEnv: OPENAI_API_KEY
+    maxTokens: 4096
+    temperature: 0.3
+    timeout: 120
+    providerMode: cli
+
+roles:
+  architect:
+    model: codex-architect
+    temperature: 0.7
+    maxTokens: 4096
+  reviewer:
+    model: codex-reviewer
+    temperature: 0.3
+    maxTokens: 4096

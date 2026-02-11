@@ -1,0 +1,53 @@
+# CodeMoot Preset: Balanced
+# Best quality-to-cost ratio. Uses Claude Sonnet 4.5 for architecture
+# and GPT-5 for review -- the "second opinion" value proposition.
+
+models:
+  claude-sonnet:
+    provider: anthropic
+    model: claude-sonnet-4-5-20250929
+    apiKeyEnv: ANTHROPIC_API_KEY
+    maxTokens: 4096
+    temperature: 0.7
+    timeout: 120
+  gpt-5:
+    provider: openai
+    model: gpt-5
+    apiKeyEnv: OPENAI_API_KEY
+    maxTokens: 4096
+    temperature: 0.7
+    timeout: 120
+
+roles:
+  architect:
+    model: claude-sonnet
+    temperature: 0.7
+    maxTokens: 4096
+  reviewer:
+    model: gpt-5
+    temperature: 0.3
+    maxTokens: 4096
+  implementer:
+    model: claude-sonnet
+    temperature: 0.4
+    maxTokens: 8192
+
+workflow: plan-review-implement
+mode: autonomous
+
+debate:
+  defaultPattern: proposal-critique
+  maxRounds: 3
+  consensusThreshold: 0.7
+
+budget:
+  perSession: 5.0
+  perDay: 25.0
+  perMonth: 200.0
+  warningAt: 0.8
+  action: warn
+
+advanced:
+  retryAttempts: 3
+  stream: true
+  logLevel: info

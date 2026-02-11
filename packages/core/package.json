@@ -1,0 +1,62 @@
+{
+  "name": "@codemoot/core",
+  "version": "0.2.0",
+  "description": "Multi-model AI orchestration engine — debate, review, policy, caching, and job queue",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/katarmal-ram/codemoot.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/katarmal-ram/codemoot#readme",
+  "bugs": "https://github.com/katarmal-ram/codemoot/issues",
+  "keywords": [
+    "ai",
+    "llm",
+    "orchestration",
+    "multi-model",
+    "code-review",
+    "mcp",
+    "debate",
+    "policy",
+    "codex"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "eventemitter3": "^5.0.0",
+    "ignore": "^7.0.5",
+    "nanoid": "^5.1.0",
+    "yaml": "^2.7.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0"
+  }
+}

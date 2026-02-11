@@ -1,0 +1,53 @@
+# CodeMoot Preset: Budget
+# Minimizes cost while keeping multi-model review.
+# Uses Claude Haiku 4.5 (cheap, fast) and GPT-5 Mini.
+
+models:
+  claude-haiku:
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+    apiKeyEnv: ANTHROPIC_API_KEY
+    maxTokens: 2048
+    temperature: 0.5
+    timeout: 60
+  gpt-5-mini:
+    provider: openai
+    model: gpt-5-mini
+    apiKeyEnv: OPENAI_API_KEY
+    maxTokens: 2048
+    temperature: 0.5
+    timeout: 60
+
+roles:
+  architect:
+    model: claude-haiku
+    temperature: 0.5
+    maxTokens: 2048
+  reviewer:
+    model: gpt-5-mini
+    temperature: 0.2
+    maxTokens: 2048
+  implementer:
+    model: claude-haiku
+    temperature: 0.3
+    maxTokens: 4096
+
+workflow: plan-review-implement
+mode: autonomous
+
+debate:
+  defaultPattern: proposal-critique
+  maxRounds: 2
+  consensusThreshold: 0.6
+
+budget:
+  perSession: 1.0
+  perDay: 5.0
+  perMonth: 50.0
+  warningAt: 0.7
+  action: pause
+
+advanced:
+  retryAttempts: 2
+  stream: true
+  logLevel: info

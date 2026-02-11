@@ -1,0 +1,30 @@
+name: plan-review-implement
+description: Plan with architect, review with reviewer, implement, and code review
+steps:
+  - id: plan
+    type: generate
+    role: architect
+    output: plan.output
+  - id: review-plan
+    type: review
+    role: reviewer
+    input: [plan.output]
+    output: review-plan.output
+    loop:
+      maxIterations: 3
+      exitWhen: "review.approved == true"
+      iteratesWith: plan
+  - id: implement
+    type: generate
+    role: architect
+    input: [plan.output]
+    output: implement.output
+  - id: code-review
+    type: review
+    role: reviewer
+    input: [implement.output]
+    output: code-review.output
+    loop:
+      maxIterations: 3
+      exitWhen: "review.approved == true"
+      iteratesWith: implement
