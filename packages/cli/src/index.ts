@@ -306,6 +306,7 @@ program
   .addOption(new Option('--focus <area>', 'Focus area').choices(['security', 'performance', 'bugs', 'all']).default('bugs'))
   .option('--timeout <seconds>', 'Timeout per round', (v: string) => Number.parseInt(v, 10), 600)
   .option('--dry-run', 'Review only, do not apply fixes', false)
+  .option('--no-stage', 'Do not git-stage applied fixes')
   .option('--diff <revspec>', 'Fix issues in a git diff')
   .option('--session <id>', 'Use specific session')
   .action(fixCommand);

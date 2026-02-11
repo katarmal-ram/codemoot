@@ -77,7 +77,8 @@ export async function workerCommand(options: WorkerOptions): Promise<void> {
       const rawCwd = resolve((payload.path as string) ?? (payload.cwd as string) ?? projectDir);
       const cwd = normalize(rawCwd);
       // Prevent path traversal — resolved path must be within projectDir
-      if (!cwd.startsWith(normalize(projectDir))) {
+      const sep = process.platform === 'win32' ? '\\' : '/';
+      if (cwd !== normalize(projectDir) && !cwd.startsWith(normalize(projectDir) + sep)) {
         throw new Error(`Path traversal blocked: "${cwd}" is outside project directory "${projectDir}"`);
       }
       const timeout = ((payload.timeout as number) ?? 600) * 1000;

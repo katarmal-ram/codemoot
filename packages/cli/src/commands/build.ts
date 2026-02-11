@@ -3,7 +3,7 @@
 import type { BuildRun, BuildSummary } from '@codemoot/core';
 import { BuildStore, DebateStore, REVIEW_DIFF_MAX_CHARS, REVIEW_TEXT_MAX_CHARS, SessionManager, buildHandoffEnvelope, generateId, loadConfig, openDatabase } from '@codemoot/core';
 import chalk from 'chalk';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -326,7 +326,7 @@ export async function buildReviewCommand(buildId: string): Promise<void> {
           // Copy current HEAD tree into temp index, then add all working tree changes
           execSync(`git read-tree HEAD`, { cwd: projectDir, encoding: 'utf-8', env: { ...process.env, GIT_INDEX_FILE: tmpIndex } });
           execSync('git add -A', { cwd: projectDir, encoding: 'utf-8', env: { ...process.env, GIT_INDEX_FILE: tmpIndex } });
-          diff = execSync(`git diff --cached ${run.baselineRef}`, { cwd: projectDir, encoding: 'utf-8', maxBuffer: 1024 * 1024, env: { ...process.env, GIT_INDEX_FILE: tmpIndex } });
+          diff = execFileSync('git', ['diff', '--cached', '--', run.baselineRef], { cwd: projectDir, encoding: 'utf-8', maxBuffer: 1024 * 1024, env: { ...process.env, GIT_INDEX_FILE: tmpIndex } });
         } finally {
           try { unlinkSync(tmpIndex); } catch { /* already cleaned */ }
         }

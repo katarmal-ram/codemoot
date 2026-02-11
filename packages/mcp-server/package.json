@@ -1,6 +1,6 @@
 {
   "name": "@codemoot/mcp-server",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "MCP server for multi-model AI code review, planning, debate, and memory (experimental)",
   "type": "module",
   "license": "MIT",

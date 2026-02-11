@@ -166,7 +166,7 @@ export async function reviewCommand(fileOrGlob: string | undefined, options: Rev
       // ── Diff mode: review git changes ──
       let diff: string;
       try {
-        diff = execFileSync('git', ['diff', ...(options.diff as string).split(/\s+/)], {
+        diff = execFileSync('git', ['diff', '--', ...(options.diff as string).split(/\s+/)], {
           cwd: projectDir,
           encoding: 'utf-8',
           maxBuffer: 1024 * 1024,
@@ -202,7 +202,10 @@ export async function reviewCommand(fileOrGlob: string | undefined, options: Rev
         globPattern = `${globPattern}/**/*`;
         console.error(chalk.dim(`  Expanding directory to: ${globPattern}`));
       }
-      const paths = globSync(globPattern, { cwd: projectDir }).map(p => resolve(projectDir, p));
+      const projectRoot = resolve(projectDir) + (process.platform === 'win32' ? '\\' : '/');
+      const paths = globSync(globPattern, { cwd: projectDir })
+        .map(p => resolve(projectDir, p))
+        .filter(p => p.startsWith(projectRoot) || p === resolve(projectDir));
       if (paths.length === 0) {
         console.error(chalk.red(`No files matched: ${fileOrGlob}`));
         db.close();

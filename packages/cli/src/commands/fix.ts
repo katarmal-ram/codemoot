@@ -1,6 +1,8 @@
-// packages/cli/src/commands/fix.ts — Autofix loop: review → propose fix → apply → re-review
+// packages/cli/src/commands/fix.ts — Autofix loop: GPT reviews → CLI applies fixes → GPT re-reviews
 
 import { execFileSync, execSync } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   type CliAdapter,
   DEFAULT_RULES,
@@ -25,6 +27,15 @@ interface FixOptions {
   dryRun: boolean;
   diff?: string;
   session?: string;
+  noStage?: boolean;
+}
+
+interface ParsedFix {
+  file: string;
+  line: number;
+  description: string;
+  oldCode: string;
+  newCode: string;
 }
 
 interface FixRound {
@@ -33,8 +44,98 @@ interface FixRound {
   reviewScore: number | null;
   criticalCount: number;
   warningCount: number;
-  fixApplied: boolean;
+  fixesProposed: number;
+  fixesApplied: number;
+  fixesFailed: number;
+  exitReason: string;
   durationMs: number;
+}
+
+/**
+ * Parse FIX blocks from GPT review output.
+ * Expected format:
+ *   FIX: <file>:<line> <description>
+ *   ```old
+ *   <old code>
+ *   ```
+ *   ```new
+ *   <new code>
+ *   ```
+ *
+ * Also supports simpler format:
+ *   FIX: <file>:<line> <description>
+ *   ```
+ *   <replacement code>
+ *   ```
+ */
+function parseFixes(text: string): ParsedFix[] {
+  const fixes: ParsedFix[] = [];
+
+  // Match FIX: lines followed by code blocks
+  const fixPattern = /FIX:\s*(\S+?):(\d+)\s+(.+?)(?:\n```old\n([\s\S]*?)\n```\s*\n```new\n([\s\S]*?)\n```|(?:\n```\n([\s\S]*?)\n```))/g;
+
+  let match: RegExpExecArray | null;
+  match = fixPattern.exec(text);
+  while (match !== null) {
+    const file = match[1];
+    const line = Number.parseInt(match[2], 10);
+    const description = match[3].trim();
+
+    if (match[4] !== undefined && match[5] !== undefined) {
+      // old/new format
+      fixes.push({ file, line, description, oldCode: match[4], newCode: match[5] });
+    } else if (match[6] !== undefined) {
+      // Simple replacement format — we'll need the old code from the file
+      fixes.push({ file, line, description, oldCode: '', newCode: match[6] });
+    }
+    match = fixPattern.exec(text);
+  }
+
+  return fixes;
+}
+
+/**
+ * Apply a single fix to a file. Returns true if applied successfully.
+ */
+function applyFix(fix: ParsedFix, projectDir: string): boolean {
+  const filePath = resolve(projectDir, fix.file);
+
+  // Path traversal guard: resolved path must stay within projectDir
+  const normalizedProject = resolve(projectDir) + (process.platform === 'win32' ? '\\' : '/');
+  if (!resolve(filePath).startsWith(normalizedProject)) {
+    return false;
+  }
+
+  let content: string;
+  try {
+    content = readFileSync(filePath, 'utf-8');
+  } catch {
+    return false;
+  }
+
+  const lines = content.split('\n');
+
+  if (fix.oldCode) {
+    // Exact string replacement
+    const trimmedOld = fix.oldCode.trim();
+    if (content.includes(trimmedOld)) {
+      const updated = content.replace(trimmedOld, fix.newCode.trim());
+      writeFileSync(filePath, updated, 'utf-8');
+      return true;
+    }
+    return false;
+  }
+
+  // Line-based replacement (simple format)
+  const lineIdx = fix.line - 1;
+  if (lineIdx < 0 || lineIdx >= lines.length) return false;
+
+  const newLines = fix.newCode.trim().split('\n');
+  // Replace the target line(s) with the new code
+  const oldLineCount = Math.max(1, newLines.length);
+  lines.splice(lineIdx, oldLineCount, ...newLines);
+  writeFileSync(filePath, lines.join('\n'), 'utf-8');
+  return true;
 }
 
 export async function fixCommand(fileOrGlob: string, options: FixOptions): Promise<void> {
@@ -76,6 +177,8 @@ export async function fixCommand(fileOrGlob: string, options: FixOptions): Promi
   let threadId = currentSession?.codexThreadId ?? undefined;
   const rounds: FixRound[] = [];
   let converged = false;
+  const stuckFingerprints = new Set<string>();
+  let prevFingerprints = new Set<string>();
 
   console.error(
     chalk.cyan(
@@ -84,21 +187,20 @@ export async function fixCommand(fileOrGlob: string, options: FixOptions): Promi
   );
 
   for (let round = 1; round <= options.maxRounds; round++) {
-    // Auto-rollover on session overflow (checked each round)
     const overflowCheck = sessionMgr.preCallOverflowCheck(session.id);
     if (overflowCheck.rolled) {
       console.error(chalk.yellow(`  ${overflowCheck.message}`));
-      threadId = undefined; // Don't reuse old thread after rollover
+      threadId = undefined;
     }
 
     const roundStart = Date.now();
     console.error(chalk.dim(`\n── Round ${round}/${options.maxRounds} ──`));
 
-    // Step 1: Review
+    // Step 1: GPT reviews and proposes fixes
     let diffContent = '';
     if (options.diff) {
       try {
-        diffContent = execFileSync('git', ['diff', ...options.diff.split(/\s+/)], {
+        diffContent = execFileSync('git', ['diff', '--', ...options.diff.split(/\s+/)], {
           cwd: projectDir,
           encoding: 'utf-8',
           maxBuffer: 1024 * 1024,
@@ -108,17 +210,37 @@ export async function fixCommand(fileOrGlob: string, options: FixOptions): Promi
       }
     }
 
+    const fixOutputContract = [
+      'You are an autofix engine. For EVERY fixable issue, you MUST output this EXACT format:',
+      '',
+      'FIX: path/to/file.ts:42 Description of the bug',
+      '```old',
+      'exact old code copied from the file',
+      '```',
+      '```new',
+      'exact replacement code',
+      '```',
+      '',
+      'Then end with:',
+      'VERDICT: APPROVED or VERDICT: NEEDS_REVISION',
+      'SCORE: X/10',
+      '',
+      'Rules:',
+      '- The ```old block MUST be an exact substring copy from the file (whitespace-sensitive).',
+      '- One FIX block per issue.',
+      '- Issues without a FIX block are IGNORED by the autofix engine.',
+      '- If the code is clean, output VERDICT: APPROVED with no FIX blocks.',
+    ].join('\n');
+
     const reviewPrompt = buildHandoffEnvelope({
-      command: 'review',
+      command: 'custom',
       task: options.diff
-        ? `Review and identify fixable issues in this diff.\n\nGIT DIFF (${options.diff}):\n${diffContent.slice(0, REVIEW_DIFF_MAX_CHARS)}`
-        : `Review ${fileOrGlob} and identify fixable issues. Read the file(s) first, then report issues with exact line numbers.`,
+        ? `Review and identify fixable issues in this diff.\n\nGIT DIFF (${options.diff}):\n${diffContent.slice(0, REVIEW_DIFF_MAX_CHARS)}\n\n${fixOutputContract}`
+        : `Review ${fileOrGlob} and identify fixable issues. Read the file(s) first, then report issues with exact line numbers and exact fixes.\n\n${fixOutputContract}`,
       constraints: [
         `Focus: ${options.focus}`,
-        'For each issue, provide the EXACT fix as a code snippet.',
-        'Format fixes as: FIX: <file>:<line> <description>\n```\n<fixed code>\n```',
         round > 1
-          ? `This is re-review round ${round}. Previous fixes were applied. Check if issues are resolved.`
+          ? `This is re-review round ${round}. Previous fixes were applied by the host. Only report REMAINING unfixed issues.`
           : '',
       ].filter(Boolean),
       resumed: Boolean(threadId),
@@ -127,7 +249,7 @@ export async function fixCommand(fileOrGlob: string, options: FixOptions): Promi
     const timeoutMs = options.timeout * 1000;
     const progress = createProgressCallbacks('fix-review');
 
-    console.error(chalk.dim('  Reviewing...'));
+    console.error(chalk.dim('  GPT reviewing...'));
     const reviewResult = await (adapter as CliAdapter).callWithResume(reviewPrompt, {
       sessionId: threadId,
       timeout: timeoutMs,
@@ -140,13 +262,25 @@ export async function fixCommand(fileOrGlob: string, options: FixOptions): Promi
     }
     sessionMgr.addUsageFromResult(session.id, reviewResult.usage, reviewPrompt, reviewResult.text);
 
-    // Parse review findings
+    sessionMgr.recordEvent({
+      sessionId: session.id,
+      command: 'fix',
+      subcommand: `review-round-${round}`,
+      promptPreview: `Fix review round ${round}: ${fileOrGlob}`,
+      responsePreview: reviewResult.text.slice(0, 500),
+      promptFull: reviewPrompt,
+      responseFull: reviewResult.text,
+      usageJson: JSON.stringify(reviewResult.usage),
+      durationMs: reviewResult.durationMs,
+      codexThreadId: reviewResult.sessionId,
+    });
+
+    // Parse verdict
     const tail = reviewResult.text.slice(-500);
     const verdictMatch = tail.match(/VERDICT:\s*(APPROVED|NEEDS_REVISION)/i);
     const scoreMatch = tail.match(/SCORE:\s*(\d+)\/10/);
     const verdict = verdictMatch ? verdictMatch[1].toLowerCase() : 'unknown';
     const score = scoreMatch ? Number.parseInt(scoreMatch[1], 10) : null;
-
     const criticalCount = (reviewResult.text.match(/CRITICAL/gi) ?? []).length;
     const warningCount = (reviewResult.text.match(/WARNING/gi) ?? []).length;
 
@@ -154,7 +288,7 @@ export async function fixCommand(fileOrGlob: string, options: FixOptions): Promi
       `  Verdict: ${verdict}, Score: ${score ?? '?'}/10, Critical: ${criticalCount}, Warning: ${warningCount}`,
     );
 
-    // Check if approved — converged
+    // Check if approved
     if (verdict === 'approved' && criticalCount === 0) {
       rounds.push({
         round,
@@ -162,59 +296,103 @@ export async function fixCommand(fileOrGlob: string, options: FixOptions): Promi
         reviewScore: score,
         criticalCount,
         warningCount,
-        fixApplied: false,
+        fixesProposed: 0,
+        fixesApplied: 0,
+        fixesFailed: 0,
+        exitReason: 'all_resolved',
         durationMs: Date.now() - roundStart,
       });
       converged = true;
-      console.error(chalk.green('  Review APPROVED — no fixes needed.'));
+      console.error(chalk.green('  APPROVED — all issues resolved.'));
       break;
     }
 
-    // Step 2: Ask codex to apply fixes
-    if (options.dryRun) {
-      console.error(chalk.yellow('  Dry-run: skipping fix application.'));
+    // Parse fixes from GPT output
+    const fixes = parseFixes(reviewResult.text);
+    console.error(chalk.dim(`  Found ${fixes.length} fix proposal(s)`));
+
+    if (fixes.length === 0) {
       rounds.push({
         round,
         reviewVerdict: verdict,
         reviewScore: score,
         criticalCount,
         warningCount,
-        fixApplied: false,
+        fixesProposed: 0,
+        fixesApplied: 0,
+        fixesFailed: 0,
+        exitReason: 'no_fixes_proposed',
+        durationMs: Date.now() - roundStart,
+      });
+      console.error(chalk.yellow('  GPT found issues but proposed no structured fixes. Stopping.'));
+      break;
+    }
+
+    if (options.dryRun) {
+      console.error(chalk.yellow('  Dry-run: showing proposed fixes without applying.'));
+      for (const fix of fixes) {
+        console.error(chalk.dim(`    ${fix.file}:${fix.line} — ${fix.description}`));
+      }
+      rounds.push({
+        round,
+        reviewVerdict: verdict,
+        reviewScore: score,
+        criticalCount,
+        warningCount,
+        fixesProposed: fixes.length,
+        fixesApplied: 0,
+        fixesFailed: 0,
+        exitReason: 'dry_run',
         durationMs: Date.now() - roundStart,
       });
       continue;
     }
 
-    console.error(chalk.dim('  Applying fixes...'));
+    // Step 2: Apply fixes locally (host applies, not GPT)
+    let applied = 0;
+    let failed = 0;
+    const currentFingerprints = new Set<string>();
 
-    const fixPrompt = buildHandoffEnvelope({
-      command: 'custom',
-      task: `Based on the review above, apply ALL suggested fixes to the codebase. Use your file editing tools to make the changes. After applying, verify the changes compile correctly. Only fix issues that were identified — do not refactor or change unrelated code.`,
-      constraints: [
-        'Make minimal, targeted changes only.',
-        'Do not add comments, docstrings, or formatting changes.',
-        'If a fix is ambiguous, skip it rather than guess.',
-      ],
-      resumed: true,
-    });
+    for (const fix of fixes) {
+      const fingerprint = `${fix.file}:${fix.description}`;
+      currentFingerprints.add(fingerprint);
 
-    const fixResult = await (adapter as CliAdapter).callWithResume(fixPrompt, {
-      sessionId: threadId,
-      timeout: timeoutMs,
-      ...progress,
-    });
+      if (stuckFingerprints.has(fingerprint)) {
+        console.error(chalk.dim(`    Skip (stuck): ${fix.file}:${fix.line}`));
+        continue;
+      }
 
-    if (fixResult.sessionId) {
-      threadId = fixResult.sessionId;
-      sessionMgr.updateThreadId(session.id, fixResult.sessionId);
+      // Mark as stuck if same fingerprint appeared in previous round
+      if (prevFingerprints.has(fingerprint)) {
+        stuckFingerprints.add(fingerprint);
+        console.error(chalk.yellow(`    Stuck (recurring): ${fix.file}:${fix.line} — ${fix.description}`));
+        failed++;
+        continue;
+      }
+
+      const success = applyFix(fix, projectDir);
+      if (success) {
+        applied++;
+        console.error(chalk.green(`    Fixed: ${fix.file}:${fix.line} — ${fix.description}`));
+      } else {
+        failed++;
+        console.error(chalk.red(`    Failed: ${fix.file}:${fix.line} — could not match old code`));
+      }
     }
-    sessionMgr.addUsageFromResult(session.id, fixResult.usage, fixPrompt, fixResult.text);
 
-    const fixApplied =
-      !fixResult.text.includes('no changes') && !fixResult.text.includes('No fixes');
-    console.error(
-      fixApplied ? chalk.green('  Fixes applied.') : chalk.yellow('  No fixes applied.'),
-    );
+    prevFingerprints = currentFingerprints;
+
+    // Stage changes unless --no-stage
+    if (applied > 0 && !options.noStage) {
+      try {
+        execFileSync('git', ['add', '-A'], { cwd: projectDir, stdio: 'pipe' });
+        console.error(chalk.dim('  Changes staged.'));
+      } catch {
+        console.error(chalk.yellow('  Could not stage changes (not a git repo?).'));
+      }
+    }
+
+    const exitReason = applied === 0 ? 'no_diff' : 'continue';
 
     rounds.push({
       round,
@@ -222,18 +400,32 @@ export async function fixCommand(fileOrGlob: string, options: FixOptions): Promi
       reviewScore: score,
       criticalCount,
       warningCount,
-      fixApplied,
+      fixesProposed: fixes.length,
+      fixesApplied: applied,
+      fixesFailed: failed,
+      exitReason,
       durationMs: Date.now() - roundStart,
     });
 
-    if (!fixApplied) {
-      console.error(chalk.yellow('  No changes made — stopping loop.'));
+    if (applied === 0) {
+      console.error(chalk.yellow('  No fixes applied — stopping loop.'));
       break;
     }
+
+    // Check if all remaining are stuck
+    if (stuckFingerprints.size >= fixes.length) {
+      console.error(chalk.yellow('  All remaining issues are stuck — stopping.'));
+      break;
+    }
+
+    console.error(chalk.dim(`  Applied ${applied}, failed ${failed}. Continuing to re-review...`));
   }
 
-  // Policy check
+  // Final summary
   const lastRound = rounds[rounds.length - 1];
+  const totalApplied = rounds.reduce((sum, r) => sum + r.fixesApplied, 0);
+  const totalProposed = rounds.reduce((sum, r) => sum + r.fixesProposed, 0);
+
   const policyCtx: PolicyContext = {
     criticalCount: lastRound?.criticalCount ?? 0,
     warningCount: lastRound?.warningCount ?? 0,
@@ -243,17 +435,37 @@ export async function fixCommand(fileOrGlob: string, options: FixOptions): Promi
   };
   const policy = evaluatePolicy('review.completed', policyCtx, DEFAULT_RULES);
 
+  const exitReason = converged
+    ? 'all_resolved'
+    : stuckFingerprints.size > 0
+      ? 'all_stuck'
+      : lastRound?.exitReason ?? 'max_iterations';
+
   const output = {
     target: fileOrGlob,
     converged,
+    exitReason,
     rounds,
     totalRounds: rounds.length,
+    totalFixesProposed: totalProposed,
+    totalFixesApplied: totalApplied,
+    stuckCount: stuckFingerprints.size,
     finalVerdict: lastRound?.reviewVerdict ?? 'unknown',
     finalScore: lastRound?.reviewScore ?? null,
     policy,
     sessionId: session.id,
     codexThreadId: threadId,
   };
+
+  // Human-readable summary
+  const color = converged ? chalk.green : chalk.red;
+  console.error(color(`\nResult: ${converged ? 'CONVERGED' : 'NOT CONVERGED'} (${exitReason})`));
+  console.error(`  Rounds: ${rounds.length}/${options.maxRounds}`);
+  console.error(`  Fixes: ${totalApplied} applied, ${totalProposed - totalApplied} failed/skipped`);
+  if (stuckFingerprints.size > 0) {
+    console.error(chalk.yellow(`  Stuck issues: ${stuckFingerprints.size}`));
+  }
+  console.error(`  Final: ${lastRound?.reviewVerdict ?? '?'} (${lastRound?.reviewScore ?? '?'}/10)`);
 
   console.log(JSON.stringify(output, null, 2));
   db.close();

@@ -16,12 +16,26 @@ export function getDbPath(projectDir?: string): string {
  */
 export async function withDatabase<T>(fn: (db: ReturnType<typeof openDatabase>) => Promise<T>): Promise<T> {
   const db = openDatabase(getDbPath());
+  const originalExit = process.exit;
+  let requestedExitCode: number | undefined;
+
+  process.exit = ((code?: number) => {
+    requestedExitCode = typeof code === 'number' ? code : 1;
+    throw new Error('__WITH_DATABASE_EXIT__');
+  }) as typeof process.exit;
+
   try {
     return await fn(db);
   } catch (error) {
-    console.error(chalk.red(`Error: ${error instanceof Error ? error.message : String(error)}`));
-    process.exit(1);
+    if (requestedExitCode === undefined) {
+      console.error(chalk.red(`Error: ${error instanceof Error ? error.message : String(error)}`));
+    }
+    throw error;
   } finally {
+    process.exit = originalExit;
     db.close();
+    if (requestedExitCode !== undefined) {
+      originalExit(requestedExitCode);
+    }
   }
 }
