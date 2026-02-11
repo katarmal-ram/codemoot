@@ -73,7 +73,7 @@ program
 program
   .command('init')
   .description('Initialize CodeMoot in the current project')
-  .option('--preset <name>', 'Use preset (balanced|budget)')
+  .option('--preset <name>', 'Use preset (cli-first)')
   .option('--non-interactive', 'Skip prompts, use defaults')
   .option('--force', 'Overwrite existing .cowork.yml')
   .action(initCommand);
