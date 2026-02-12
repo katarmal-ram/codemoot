@@ -13,6 +13,7 @@ const THROTTLE_MS = 3_000;
 export function createProgressCallbacks(label = 'codex'): ProgressCallbacks {
   let lastActivityAt = 0;
   let lastMessage = '';
+  let carryOver = '';
 
   function printActivity(msg: string) {
     const now = Date.now();
@@ -33,8 +34,13 @@ export function createProgressCallbacks(label = 'codex'): ProgressCallbacks {
     },
 
     onProgress(chunk: string) {
-      // Parse JSONL events from codex stdout to show real activity
-      for (const line of chunk.split('\n')) {
+      // Parse JSONL events from codex stdout — handle lines split across chunks
+      const data = carryOver + chunk;
+      const lines = data.split('\n');
+      // Last element may be incomplete — carry it over to next chunk
+      carryOver = lines.pop() ?? '';
+
+      for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) continue;
         try {
@@ -75,7 +81,8 @@ function formatEvent(
 
     if (item.type === 'tool_call' || item.type === 'function_call') {
       const name = (item.name as string) ?? (item.function as string) ?? 'tool';
-      const args = String(item.arguments ?? item.input ?? '').slice(0, 80);
+      const rawArgs = item.arguments ?? item.input ?? '';
+      const args = (typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs)).slice(0, 80);
       // Extract file paths from tool args for readability
       const pathMatch = args.match(/["']([^"']*\.[a-z]{1,4})["']/i);
       if (pathMatch) {
