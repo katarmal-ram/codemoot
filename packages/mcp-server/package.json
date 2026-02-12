@@ -1,6 +1,6 @@
 {
   "name": "@codemoot/mcp-server",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "description": "MCP server for multi-model AI code review, planning, debate, and memory (experimental)",
   "type": "module",
   "license": "MIT",
@@ -36,7 +36,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@codemoot/core": "*",
+    "@codemoot/core": "^0.2.9",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "zod": "^3.24.0"
   },

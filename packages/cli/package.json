@@ -1,6 +1,6 @@
 {
   "name": "@codemoot/cli",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "description": "CLI for multi-model AI collaboration — review, debate, fix, watch, and ship code with Claude + GPT",
   "type": "module",
   "license": "MIT",
@@ -25,7 +25,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@codemoot/core": "*",
+    "@codemoot/core": "^0.2.9",
     "chalk": "^5.4.0",
     "chokidar": "^5.0.0",
     "commander": "^13.0.0",
