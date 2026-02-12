@@ -1,6 +1,7 @@
 {
   "name": "codemoot",
   "private": true,
+  "workspaces": ["packages/*"],
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm -r --parallel dev",
