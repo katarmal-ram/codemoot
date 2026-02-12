@@ -1,6 +1,6 @@
 {
   "name": "@codemoot/core",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Multi-model AI orchestration engine — debate, review, policy, caching, and job queue",
   "type": "module",
   "license": "MIT",
