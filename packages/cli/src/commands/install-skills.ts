@@ -105,6 +105,59 @@ Ask if user wants to fix and re-review. If yes:
 - **No arg size limits**: Content is piped via stdin, not passed as CLI args.
 - **Presets**: Use --preset for specialized reviews (security-audit, performance, quick-scan, pre-commit, api-review).
 - **Background mode**: Add --background to enqueue and continue working.
+- **Output capped**: JSON \`review\` field is capped to 2KB to prevent terminal crashes. Full text is stored in session_events.
+- **Progress**: Heartbeat every 60s, throttled to 30s intervals. No agent_message dumps.
+`,
+  },
+  {
+    path: '.claude/skills/plan-review/SKILL.md',
+    description: '/plan-review — GPT review of execution plans',
+    content: `---
+name: plan-review
+description: Send execution plans to GPT for structured review via Codex CLI. Use when you have a written plan and want independent validation before implementation.
+user-invocable: true
+---
+
+# /plan-review — GPT Review of Execution Plans
+
+## Usage
+\`/plan-review <plan-file-or-description>\`
+
+## Description
+Sends a Claude-authored execution plan to GPT via \`codemoot plan review\` for structured critique. GPT returns ISSUE (HIGH/MEDIUM/LOW) and SUGGEST lines with file-level references.
+
+## Instructions
+
+### Step 1: Prepare the plan
+- If the user provides a file path, use it directly
+- If reviewing the current conversation's plan, write to a temp file first
+
+### Step 2: Run plan review
+\`\`\`bash
+codemoot plan review <plan-file> [--phase N] [--build BUILD_ID] [--timeout ms] [--output file]
+\`\`\`
+
+### Step 3: Parse and present output
+JSON output includes: \`verdict\`, \`score\`, \`issues[]\` (severity + message), \`suggestions[]\`.
+
+Present as:
+\`\`\`
+## GPT Plan Review
+**Score**: X/10 | **Verdict**: APPROVED/NEEDS_REVISION
+### Issues
+- [HIGH] description
+### Suggestions
+- suggestion text
+\`\`\`
+
+### Step 4: If NEEDS_REVISION
+Fix HIGH issues, revise the plan, re-run. Session resume gives GPT context of prior review.
+
+### Important Notes
+- **Session resume**: GPT remembers prior reviews via thread resume
+- **Codebase access**: GPT reads actual project files to verify plan references
+- **Output capped**: JSON \`review\` field is capped to 2KB. Use \`--output\` for full text
+- **Zero API cost**: Uses ChatGPT subscription via Codex CLI
 `,
   },
   {
@@ -176,6 +229,8 @@ Present: final position, agreements, disagreements, stats.
 3. State persisted to SQLite
 4. Zero API cost (ChatGPT subscription)
 5. 600s default timeout per turn
+6. JSON \`response\` field capped to 2KB — check \`responseTruncated\` boolean
+7. Progress heartbeat every 60s, throttled to 30s intervals
 `,
   },
   {
@@ -207,6 +262,14 @@ Use /debate protocol. Loop until GPT says STANCE: SUPPORT.
 - Gather codebase context first
 - Send detailed implementation plan to GPT
 - Revise on OPPOSE/UNCERTAIN — never skip
+
+### Phase 1.25: Plan Review (Recommended)
+Before user approval, validate the plan with GPT:
+\`\`\`bash
+codemoot plan review /path/to/plan.md --build BUILD_ID
+\`\`\`
+GPT reviews the plan against actual codebase, returns ISSUE/SUGGEST lines.
+Fix HIGH issues before presenting to user.
 
 ### Phase 1.5: User Approval Gate
 Present agreed plan. Wait for explicit approval via AskUserQuestion.
@@ -298,25 +361,31 @@ For Claude/GPT disagreements, optionally debate via \`codemoot debate turn\`.
     content: `# Codex Liaison Agent
 
 ## Role
-Specialized teammate that communicates with GPT via Codex CLI to get independent reviews and iterate until quality reaches 9.5/10.
+Specialized teammate that communicates with GPT via codemoot CLI to get independent reviews and iterate until quality threshold is met.
 
 ## How You Work
-1. Send content to GPT via \`codex exec\` for review
-2. Parse feedback and score
-3. If score < 9.5: revise and re-submit
-4. Loop until 9.5/10 or max 7 iterations
+1. Send content to GPT via \`codemoot review\` or \`codemoot plan review\`
+2. Parse JSON output for score, verdict, findings
+3. If NEEDS_REVISION: fix issues and re-submit (session resume retains context)
+4. Loop until APPROVED or max iterations
 5. Report final version back to team lead
 
-## Calling Codex CLI
+## Available Commands
 \`\`\`bash
-codex exec --skip-git-repo-check -o ".codex-liaison-output.txt" "PROMPT_HERE"
+codemoot review <file-or-glob>           # Code review
+codemoot review --diff HEAD~3..HEAD      # Diff review
+codemoot plan review <plan-file>         # Plan review
+codemoot debate turn DEBATE_ID "prompt"  # Debate turn
+codemoot fix <file-or-glob>              # Autofix loop
 \`\`\`
 
 ## Important Rules
-- NEVER fabricate GPT's responses
+- NEVER fabricate GPT's responses — always parse actual JSON output
 - NEVER skip iterations if GPT says NEEDS_REVISION
 - Use your own judgment when GPT's feedback conflicts with project requirements
-- 9.5/10 threshold is strict
+- JSON \`review\`/\`response\` fields are capped to 2KB; use \`--output\` for full text
+- All commands use session resume — GPT retains context across calls
+- Zero API cost (ChatGPT subscription via Codex CLI)
 `,
   },
 ];
@@ -341,6 +410,8 @@ This project uses [CodeMoot](https://github.com/katarmal-ram/codemoot) for Claud
 - \`codemoot fix <file>\` — Autofix loop: review → apply fixes → re-review
 - \`codemoot debate start "topic"\` — Multi-round Claude vs GPT debate
 - \`codemoot cleanup\` — Scan for unused deps, dead code, duplicates
+- \`codemoot plan generate "task"\` — Generate plans via multi-model loop
+- \`codemoot plan review <plan-file>\` — GPT review of execution plans
 - \`codemoot shipit --profile safe\` — Composite workflow (lint+test+review)
 - \`codemoot cost\` — Token usage dashboard
 - \`codemoot doctor\` — Check prerequisites
@@ -348,6 +419,7 @@ This project uses [CodeMoot](https://github.com/katarmal-ram/codemoot) for Claud
 ### Slash Commands
 - \`/codex-review\` — Quick GPT review (uses codemoot review internally)
 - \`/debate\` — Start a Claude vs GPT debate
+- \`/plan-review\` — GPT review of execution plans
 - \`/build\` — Full build loop: debate → plan → implement → GPT review → fix
 - \`/cleanup\` — Bidirectional AI slop scanner
 
@@ -482,7 +554,7 @@ export async function installSkillsCommand(options: InstallOptions): Promise<voi
   console.error('');
   console.error(chalk.cyan(`  Installed: ${installed}, Skipped: ${skipped}`));
   console.error('');
-  console.error(chalk.dim('  Slash commands: /codex-review, /debate, /build, /cleanup'));
+  console.error(chalk.dim('  Slash commands: /codex-review, /debate, /plan-review, /build, /cleanup'));
   console.error(chalk.dim('  CLAUDE.md: Claude now knows about codemoot commands & sessions'));
   console.error(chalk.dim('  Hook: Post-commit hint to run codemoot review'));
   console.error('');
