@@ -487,10 +487,15 @@ export async function installSkillsCommand(options: InstallOptions): Promise<voi
         // Replace existing section, preserving content after it
         const markerIdx = existing.indexOf(marker);
         const before = existing.slice(0, markerIdx);
-        // Find the next top-level heading (## ) after our section, or end of file
-        const afterMarker = existing.slice(markerIdx + marker.length);
-        // Find next heading at any level (# or ##) that isn't part of our section
-        const nextHeadingMatch = afterMarker.match(/\n#{1,2} (?!#)(?!CodeMoot)/);
+        // Find the next heading after our section ends, or end of file
+        // Our section uses ### subheadings, so we detect the end by finding
+        // the CLAUDE_MD_SECTION's last line, then take everything after it
+        const sectionEnd = existing.indexOf(CLAUDE_MD_SECTION.trimEnd(), markerIdx);
+        const afterMarker = sectionEnd >= 0
+          ? existing.slice(sectionEnd + CLAUDE_MD_SECTION.trimEnd().length)
+          : existing.slice(markerIdx + marker.length);
+        // Fallback: find next heading at any level that isn't part of our section
+        const nextHeadingMatch = sectionEnd >= 0 ? null : afterMarker.match(/\n#{1,6} (?!CodeMoot)/);
         const after = nextHeadingMatch ? afterMarker.slice(nextHeadingMatch.index as number) : '';
         writeFileSync(claudeMdPath, before.trimEnd() + '\n' + CLAUDE_MD_SECTION + after, 'utf-8');
         console.error(chalk.green('  OK   CLAUDE.md (updated CodeMoot section)'));
