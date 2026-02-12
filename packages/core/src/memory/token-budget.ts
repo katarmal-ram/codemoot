@@ -35,7 +35,8 @@ export function calculateDebateTokens(history: DebateMessageRow[]): number {
     if (msg.usageJson) {
       try {
         const usage = JSON.parse(msg.usageJson);
-        total += (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+        // Only count output tokens — Codex input tokens are inflated by sandbox file access
+        total += usage.outputTokens ?? 0;
         continue;
       } catch {
         // Fall through to estimation

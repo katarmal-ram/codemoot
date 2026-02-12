@@ -44,9 +44,9 @@ describe('estimateTokens', () => {
 });
 
 describe('calculateDebateTokens', () => {
-  it('uses usage_json when available', () => {
+  it('uses only output tokens from usage_json (input tokens inflated by sandbox)', () => {
     const msgs = [makeMsg({ round: 1, usageJson: '{"inputTokens":500,"outputTokens":200}' })];
-    expect(calculateDebateTokens(msgs)).toBe(700);
+    expect(calculateDebateTokens(msgs)).toBe(200);
   });
 
   it('falls back to text estimation when no usage_json', () => {
@@ -55,12 +55,12 @@ describe('calculateDebateTokens', () => {
     expect(calculateDebateTokens(msgs)).toBe(200);
   });
 
-  it('sums across multiple rounds', () => {
+  it('sums output tokens across multiple rounds', () => {
     const msgs = [
       makeMsg({ round: 1, usageJson: '{"inputTokens":100,"outputTokens":50}' }),
       makeMsg({ round: 2, usageJson: '{"inputTokens":200,"outputTokens":100}' }),
     ];
-    expect(calculateDebateTokens(msgs)).toBe(450);
+    expect(calculateDebateTokens(msgs)).toBe(150);
   });
 
   it('handles malformed usage_json gracefully', () => {
@@ -71,8 +71,8 @@ describe('calculateDebateTokens', () => {
 });
 
 describe('getTokenBudgetStatus', () => {
-  it('calculates utilization ratio', () => {
-    const msgs = [makeMsg({ round: 1, usageJson: '{"inputTokens":7000,"outputTokens":0}' })];
+  it('calculates utilization ratio from output tokens only', () => {
+    const msgs = [makeMsg({ round: 1, usageJson: '{"inputTokens":50000,"outputTokens":7000}' })];
     const status = getTokenBudgetStatus(msgs, 10_000);
 
     expect(status.totalTokensUsed).toBe(7000);
@@ -83,7 +83,7 @@ describe('getTokenBudgetStatus', () => {
   });
 
   it('triggers stop at 90%', () => {
-    const msgs = [makeMsg({ round: 1, usageJson: '{"inputTokens":9000,"outputTokens":0}' })];
+    const msgs = [makeMsg({ round: 1, usageJson: '{"inputTokens":50000,"outputTokens":9000}' })];
     const status = getTokenBudgetStatus(msgs, 10_000);
 
     expect(status.shouldStop).toBe(true);
@@ -98,8 +98,8 @@ describe('getTokenBudgetStatus', () => {
 });
 
 describe('preflightTokenCheck', () => {
-  it('projects token usage with new prompt', () => {
-    const msgs = [makeMsg({ round: 1, usageJson: '{"inputTokens":5000,"outputTokens":0}' })];
+  it('projects token usage with new prompt (output tokens + prompt estimate)', () => {
+    const msgs = [makeMsg({ round: 1, usageJson: '{"inputTokens":50000,"outputTokens":5000}' })];
     const newPrompt = 'a'.repeat(4000); // ~1000 tokens
 
     const status = preflightTokenCheck(msgs, newPrompt, 10_000);
@@ -109,7 +109,7 @@ describe('preflightTokenCheck', () => {
   });
 
   it('warns when new prompt pushes over 70%', () => {
-    const msgs = [makeMsg({ round: 1, usageJson: '{"inputTokens":6000,"outputTokens":0}' })];
+    const msgs = [makeMsg({ round: 1, usageJson: '{"inputTokens":50000,"outputTokens":6000}' })];
     const newPrompt = 'a'.repeat(4000); // ~1000 tokens → 7000 total
 
     const status = preflightTokenCheck(msgs, newPrompt, 10_000);

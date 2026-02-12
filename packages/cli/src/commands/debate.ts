@@ -16,6 +16,7 @@ import {
   preflightTokenCheck,
 } from '@codemoot/core';
 import chalk from 'chalk';
+import { writeFileSync } from 'node:fs';
 
 import { createProgressCallbacks } from '../progress.js';
 import { getDbPath } from '../utils.js';
@@ -24,6 +25,7 @@ import { getDbPath } from '../utils.js';
 
 interface StartOptions {
   maxRounds?: number;
+  timeout?: number;
 }
 
 export async function debateStartCommand(topic: string, options: StartOptions): Promise<void> {
@@ -53,7 +55,8 @@ export async function debateStartCommand(topic: string, options: StartOptions): 
       sessionIds: {},
       resumeStats: { attempted: 0, succeeded: 0, fallbacks: 0 },
       maxRounds: options.maxRounds ?? 5,
-    } as DebateEngineState & { maxRounds: number });
+      defaultTimeout: options.timeout,
+    } as DebateEngineState & { maxRounds: number; defaultTimeout?: number });
 
     // Output JSON for the /debate skill to parse
     const output = {
@@ -77,6 +80,8 @@ export async function debateStartCommand(topic: string, options: StartOptions): 
 interface TurnOptions {
   round?: number;
   timeout?: number;
+  output?: string;
+  force?: boolean;
 }
 
 export async function debateTurnCommand(
@@ -117,11 +122,14 @@ export async function debateTurnCommand(
 
     const rawRound = options.round ?? (criticRow.round + 1);
     const newRound = Number.isFinite(rawRound) && rawRound > 0 ? rawRound : criticRow.round + 1;
-    const rawTimeout = options.timeout ?? 600;
+
+    // Load persisted state for maxRounds and default timeout
+    const proposerStateForLimit = store.loadState(debateId, 'proposer');
+    const storedTimeout = (proposerStateForLimit as (typeof proposerStateForLimit & { defaultTimeout?: number }))?.defaultTimeout;
+    const rawTimeout = options.timeout ?? storedTimeout ?? 600;
     const timeout = (Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : 600) * 1000;
 
     // Enforce maxRounds from persisted state
-    const proposerStateForLimit = store.loadState(debateId, 'proposer');
     const rawMax = (proposerStateForLimit as (typeof proposerStateForLimit & { maxRounds?: number }))?.maxRounds ?? 5;
     const maxRounds = Number.isFinite(rawMax) && rawMax > 0 ? rawMax : 5;
     if (newRound > maxRounds) {
@@ -144,10 +152,16 @@ export async function debateTurnCommand(
         });
       }
       // Return cached response
+      if (options.output && existing.responseText) {
+        writeFileSync(options.output, existing.responseText, 'utf-8');
+        console.error(chalk.dim(`Full response written to ${options.output}`));
+      }
       const output = {
         debateId,
         round: newRound,
         response: existing.responseText?.slice(0, 2000) ?? '',
+        responseTruncated: (existing.responseText?.length ?? 0) > 2000,
+        responseFile: options.output ?? undefined,
         sessionId: existing.sessionId,
         resumed: false,
         cached: true,
@@ -191,10 +205,16 @@ export async function debateTurnCommand(
     if (!msgStore.markRunning(msgId)) {
       const recheckRow = msgStore.getByRound(debateId, newRound, 'critic');
       if (recheckRow?.status === 'completed') {
+        if (options.output && recheckRow.responseText) {
+          writeFileSync(options.output, recheckRow.responseText, 'utf-8');
+          console.error(chalk.dim(`Full response written to ${options.output}`));
+        }
         const output = {
           debateId,
           round: newRound,
           response: recheckRow.responseText?.slice(0, 2000) ?? '',
+          responseTruncated: (recheckRow.responseText?.length ?? 0) > 2000,
+          responseFile: options.output ?? undefined,
           sessionId: recheckRow.sessionId,
           resumed: false,
           cached: true,
@@ -220,8 +240,12 @@ export async function debateTurnCommand(
     const completedHistory = msgStore.getHistory(debateId).filter(m => m.status === 'completed');
     const maxContext = (adapter as CliAdapter).capabilities.maxContextTokens;
     const preflight = preflightTokenCheck(completedHistory, prompt, maxContext);
-    if (preflight.shouldStop) {
-      console.error(chalk.yellow(`  Token budget at ${Math.round(preflight.utilizationRatio * 100)}% (${preflight.totalTokensUsed}/${maxContext}). Consider completing this debate.`));
+    if (preflight.shouldStop && !options.force) {
+      console.error(chalk.red(`Token budget at ${Math.round(preflight.utilizationRatio * 100)}% (${preflight.totalTokensUsed}/${maxContext}). Debate blocked — use --force to override.`));
+      db.close();
+      process.exit(1);
+    } else if (preflight.shouldStop && options.force) {
+      console.error(chalk.yellow(`  Token budget at ${Math.round(preflight.utilizationRatio * 100)}% (${preflight.totalTokensUsed}/${maxContext}) — forced past budget limit.`));
     } else if (preflight.shouldSummarize) {
       console.error(chalk.yellow(`  Token budget at ${Math.round(preflight.utilizationRatio * 100)}%. Older rounds will be summarized on resume failure.`));
     }
@@ -230,6 +254,8 @@ export async function debateTurnCommand(
     const overflowCheck = sessionMgr.preCallOverflowCheck(unifiedSession.id);
     if (overflowCheck.rolled) {
       console.error(chalk.yellow(`  ${overflowCheck.message}`));
+      console.error(chalk.yellow('  Warning: Session rolled over — previous conversation context has been lost.'));
+      sessionMgr.updateThreadId(unifiedSession.id, null);
       existingSessionId = undefined; // Don't reuse old thread after rollover
     }
 
@@ -324,12 +350,18 @@ export async function debateTurnCommand(
         store.saveState(debateId, 'proposer', proposerState);
       }
 
+      // Write full response to file if --output specified
+      if (options.output) {
+        writeFileSync(options.output, result.text, 'utf-8');
+        console.error(chalk.dim(`Full response written to ${options.output}`));
+      }
       // Output JSON for the /debate skill to parse
       const output = {
         debateId,
         round: newRound,
         response: result.text.slice(0, 2000),
         responseTruncated: result.text.length > 2000,
+        responseFile: options.output ?? undefined,
         sessionId: result.sessionId,
         resumed,
         cached: false,
@@ -346,7 +378,7 @@ export async function debateTurnCommand(
       for (const line of previewLines) {
         console.error(chalk.dim(`  ${line.trim().slice(0, 120)}`));
       }
-      console.error(chalk.dim(`Duration: ${(result.durationMs / 1000).toFixed(1)}s | Tokens: ${result.usage?.totalTokens ?? '?'} | Resumed: ${resumed}`));
+      console.error(chalk.dim(`Duration: ${(result.durationMs / 1000).toFixed(1)}s | Output: ${result.usage?.outputTokens ?? '?'} tokens | Input: ${result.usage?.inputTokens ?? '?'} (includes sandbox) | Resumed: ${resumed}`));
 
       console.log(JSON.stringify(output, null, 2));
     } catch (error) {
@@ -361,6 +393,16 @@ export async function debateTurnCommand(
     console.error(chalk.red(`Error: ${error instanceof Error ? error.message : String(error)}`));
     process.exit(1);
   }
+}
+
+// ── codemoot debate next ──
+
+export async function debateNextCommand(
+  debateId: string,
+  options: TurnOptions,
+): Promise<void> {
+  const prompt = 'Continue your analysis. Respond to the previous round\'s arguments and refine your position.';
+  return debateTurnCommand(debateId, prompt, options);
 }
 
 // ── codemoot debate status ──
@@ -467,7 +509,7 @@ export async function debateListCommand(options: ListOptions): Promise<void> {
 
 // ── codemoot debate history ──
 
-export async function debateHistoryCommand(debateId: string): Promise<void> {
+export async function debateHistoryCommand(debateId: string, options: { output?: string } = {}): Promise<void> {
   let db: ReturnType<typeof openDatabase> | undefined;
   try {
     const dbPath = getDbPath();
@@ -515,6 +557,31 @@ export async function debateHistoryCommand(debateId: string): Promise<void> {
         completedAt: m.completedAt ? new Date(m.completedAt).toISOString() : null,
       })),
     };
+
+    // Write full history to file if --output specified
+    if (options.output) {
+      const fullOutput = {
+        ...output,
+        messages: history.map(m => ({
+          round: m.round,
+          role: m.role,
+          bridge: m.bridge,
+          model: m.model,
+          status: m.status,
+          stance: m.stance,
+          confidence: m.confidence,
+          durationMs: m.durationMs,
+          sessionId: m.sessionId,
+          promptText: m.promptText,
+          responseText: m.responseText ?? null,
+          error: m.error,
+          createdAt: new Date(m.createdAt).toISOString(),
+          completedAt: m.completedAt ? new Date(m.completedAt).toISOString() : null,
+        })),
+      };
+      writeFileSync(options.output, JSON.stringify(fullOutput, null, 2), 'utf-8');
+      console.error(chalk.dim(`Full history written to ${options.output}`));
+    }
 
     console.log(JSON.stringify(output, null, 2));
     db.close();

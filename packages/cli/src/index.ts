@@ -13,6 +13,7 @@ import {
   debateCompleteCommand,
   debateHistoryCommand,
   debateListCommand,
+  debateNextCommand,
   debateStartCommand,
   debateStatusCommand,
   debateTurnCommand,
@@ -160,6 +161,12 @@ debate
   .description('Start a new debate')
   .argument('<topic>', 'Debate topic or question')
   .option('--max-rounds <n>', 'Max debate rounds', (v: string) => Number.parseInt(v, 10), 5)
+  .option('--timeout <seconds>', 'Default timeout for debate turns in seconds', (v: string) => {
+    if (!/^\d+$/.test(v)) throw new InvalidArgumentError('Timeout must be a positive integer');
+    const n = Number.parseInt(v, 10);
+    if (n <= 0) throw new InvalidArgumentError('Timeout must be a positive integer');
+    return n;
+  })
   .action(debateStartCommand);
 
 debate
@@ -168,8 +175,19 @@ debate
   .argument('<debate-id>', 'Debate ID from start command')
   .argument('<prompt>', 'Prompt to send to GPT')
   .option('--round <n>', 'Round number', (v: string) => Number.parseInt(v, 10))
-  .option('--timeout <seconds>', 'Timeout in seconds', (v: string) => Number.parseInt(v, 10), 600)
+  .option('--timeout <seconds>', 'Timeout in seconds', (v: string) => Number.parseInt(v, 10))
+  .option('--output <file>', 'Write full untruncated response to file')
+  .option('--force', 'Continue past token budget limit', false)
   .action(debateTurnCommand);
+
+debate
+  .command('next')
+  .description('Continue debate with auto-generated prompt')
+  .argument('<debate-id>', 'Debate ID')
+  .option('--timeout <seconds>', 'Timeout in seconds', (v: string) => Number.parseInt(v, 10))
+  .option('--output <file>', 'Write full untruncated response to file')
+  .option('--force', 'Continue past token budget limit', false)
+  .action(debateNextCommand);
 
 debate
   .command('status')
@@ -188,6 +206,7 @@ debate
   .command('history')
   .description('Show full message history with token budget')
   .argument('<debate-id>', 'Debate ID')
+  .option('--output <file>', 'Write full untruncated history to file')
   .action(debateHistoryCommand);
 
 debate
