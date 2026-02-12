@@ -52,6 +52,8 @@ export interface PlanOptions {
   maxRounds?: number;
   stream?: boolean;
   workflowDir?: string;
+  /** Score threshold (1-10) for auto-approving plans on 2nd+ iteration. Default: 8. */
+  autoApproveThreshold?: number;
 }
 
 export interface SessionResult {
@@ -165,6 +167,7 @@ export class Orchestrator extends EventEmitter<OrchestratorEvents> {
     return this.executeSession(task, ['plan-review'], {
       maxIterations: options?.maxRounds,
       stream: options?.stream,
+      planAutoApproveThreshold: options?.autoApproveThreshold ?? 8,
     });
   }
 
@@ -530,7 +533,7 @@ export class Orchestrator extends EventEmitter<OrchestratorEvents> {
   private async executeSession(
     task: string,
     phases: SessionPhase[],
-    options: { maxIterations?: number; stream?: boolean; mode?: ExecutionMode },
+    options: { maxIterations?: number; stream?: boolean; mode?: ExecutionMode; planAutoApproveThreshold?: number },
   ): Promise<SessionResult> {
     const startTime = Date.now();
     const maxIterations = options.maxIterations ?? this.config.debate.maxRounds ?? 3;
@@ -596,6 +599,7 @@ export class Orchestrator extends EventEmitter<OrchestratorEvents> {
           maxIterations,
           stepRunner,
           this.eventBus,
+          { autoApproveThreshold: options.planAutoApproveThreshold },
         );
         inputs.set('plan.output', planLoop.finalOutput);
         totalIterations += planLoop.iterations;

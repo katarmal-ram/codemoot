@@ -290,7 +290,8 @@ export async function cleanupCommand(path: string, options: CleanupOptions): Pro
       console.error(chalk.green(`  Findings written to ${options.output}`));
     }
 
-    console.log(JSON.stringify(report, null, 2));
+    const reportJson = JSON.stringify(report, null, 2);
+    console.log(reportJson.length > 2000 ? `${reportJson.slice(0, 2000)}\n... (truncated, ${reportJson.length} chars total — use --output to save full report)` : reportJson);
 
     db.close();
   } catch (error) {

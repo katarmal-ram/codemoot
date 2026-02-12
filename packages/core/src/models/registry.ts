@@ -94,11 +94,10 @@ export class ModelRegistry {
    */
   async healthCheckAll(): Promise<Map<string, boolean>> {
     const results = new Map<string, boolean>();
-    // All models use codex — check once
+    // All models use codex CLI — only check availability (no API key needed)
     const detection = await detectCli('codex');
-    const healthy = detection.available && (detection.authOk ?? false);
     for (const alias of this.configs.keys()) {
-      results.set(alias, healthy);
+      results.set(alias, detection.available);
     }
     return results;
   }

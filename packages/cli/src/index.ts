@@ -38,7 +38,7 @@ import {
   jobsRetryCommand,
   jobsStatusCommand,
 } from './commands/jobs.js';
-import { planCommand } from './commands/plan.js';
+import { planGenerateCommand, planReviewCommand } from './commands/plan.js';
 import { reviewCommand } from './commands/review.js';
 import { runCommand } from './commands/run.js';
 import { shipitCommand } from './commands/shipit.js';
@@ -129,13 +129,27 @@ program
   .option('--quiet', 'Suppress human-readable summary')
   .action(cleanupCommand);
 
-program
+const plan = program
   .command('plan')
+  .description('Plan generation and review — write plans, get GPT review');
+
+plan
+  .command('generate')
   .description('Generate a plan using architect + reviewer loop')
   .argument('<task>', 'Task to plan')
   .option('--rounds <n>', 'Max plan-review rounds', (v: string) => Number.parseInt(v, 10), 3)
   .option('--output <file>', 'Save plan to file')
-  .action(planCommand);
+  .action(planGenerateCommand);
+
+plan
+  .command('review')
+  .description('Send a host-authored plan to codex for review')
+  .argument('<plan-file>', 'Plan file to review (use - for stdin)')
+  .option('--build <id>', 'Link review to a build ID')
+  .option('--phase <id>', 'Phase identifier (e.g. "1", "setup")')
+  .option('--timeout <seconds>', 'Review timeout', (v: string) => Number.parseInt(v, 10), 300)
+  .option('--output <file>', 'Save review result to file')
+  .action(planReviewCommand);
 
 const debate = program
   .command('debate')

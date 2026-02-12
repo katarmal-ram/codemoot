@@ -9,6 +9,12 @@ export interface LoopResult {
   iterations: number;
   approved: boolean;
   history: StepResult[];
+  finalScore?: number;
+}
+
+export interface LoopOptions {
+  /** Score threshold for auto-approval on iteration >= 2. Only applies when set. */
+  autoApproveThreshold?: number;
 }
 
 export class LoopController {
@@ -20,6 +26,7 @@ export class LoopController {
     maxIterations: number,
     runner: StepRunner,
     eventBus: EventBus,
+    loopOptions?: LoopOptions,
   ): Promise<LoopResult> {
     const history: StepResult[] = [];
     let currentInputs = new Map(inputs);
@@ -38,7 +45,20 @@ export class LoopController {
       const reviewResult = await runner.execute(reviewStep, reviewInputs, task, iteration);
       history.push(reviewResult);
 
-      const verdict = reviewResult.verdict ?? 'needs_revision';
+      let verdict = reviewResult.verdict ?? 'needs_revision';
+      const score = reviewResult.score;
+
+      // Score-based auto-approval: if threshold set and score meets it on 2nd+ iteration
+      const threshold = loopOptions?.autoApproveThreshold;
+      if (
+        verdict === 'needs_revision' &&
+        threshold != null &&
+        score != null &&
+        score >= threshold &&
+        iteration >= 2
+      ) {
+        verdict = 'approved';
+      }
 
       // Emit loop.iteration event
       eventBus.emitEvent({
@@ -58,6 +78,7 @@ export class LoopController {
           iterations: iteration,
           approved,
           history,
+          finalScore: score,
         };
       }
 

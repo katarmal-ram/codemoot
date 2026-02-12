@@ -41,6 +41,8 @@ export interface ProgressCallbacks {
   onHeartbeat?: (elapsedSec: number) => void;
   /** Called on each stdout chunk for progress feedback. */
   onProgress?: (chunk: string) => void;
+  /** Called when the subprocess closes — flush any buffered state. */
+  onClose?: () => void;
 }
 
 export interface CliCallOptions extends ProgressCallbacks {
@@ -375,6 +377,7 @@ export class CliAdapter implements CliBridge {
         if (settled) return;
         settled = true;
         cleanup();
+        try { options?.onClose?.(); } catch { /* callback error isolation */ }
         if (code !== 0) {
           reject(
             new ModelError(

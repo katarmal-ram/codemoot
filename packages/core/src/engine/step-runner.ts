@@ -20,6 +20,7 @@ export interface StepResult {
   durationMs: number;
   verdict?: 'approved' | 'needs_revision';
   feedback?: string;
+  score?: number;
 }
 
 export class StepRunner {
@@ -116,13 +117,18 @@ export class StepRunner {
       metadata: null,
     });
 
-    // Parse verdict for review steps
+    // Parse verdict and score for review steps
     let verdict: 'approved' | 'needs_revision' | undefined;
     let feedback: string | undefined;
+    let score: number | undefined;
     if (stepType === 'review') {
       const parsed = parseVerdict(result.text);
       verdict = parsed.verdict;
       feedback = parsed.feedback || undefined;
+      const scoreMatch = result.text.slice(-500).match(/SCORE:\s*(\d+)\/10/);
+      if (scoreMatch) {
+        score = Number.parseInt(scoreMatch[1], 10);
+      }
     }
 
     // Emit step.completed
@@ -142,6 +148,7 @@ export class StepRunner {
       durationMs,
       verdict,
       feedback,
+      score,
     };
   }
 

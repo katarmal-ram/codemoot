@@ -147,7 +147,7 @@ export async function debateTurnCommand(
       const output = {
         debateId,
         round: newRound,
-        response: existing.responseText,
+        response: existing.responseText?.slice(0, 2000) ?? '',
         sessionId: existing.sessionId,
         resumed: false,
         cached: true,
@@ -194,7 +194,7 @@ export async function debateTurnCommand(
         const output = {
           debateId,
           round: newRound,
-          response: recheckRow.responseText,
+          response: recheckRow.responseText?.slice(0, 2000) ?? '',
           sessionId: recheckRow.sessionId,
           resumed: false,
           cached: true,
@@ -328,7 +328,8 @@ export async function debateTurnCommand(
       const output = {
         debateId,
         round: newRound,
-        response: result.text,
+        response: result.text.slice(0, 2000),
+        responseTruncated: result.text.length > 2000,
         sessionId: result.sessionId,
         resumed,
         cached: false,

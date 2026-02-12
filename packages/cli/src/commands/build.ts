@@ -324,9 +324,9 @@ export async function buildReviewCommand(buildId: string): Promise<void> {
         const tmpIndex = join(projectDir, '.git', 'codemoot-review-index');
         try {
           // Copy current HEAD tree into temp index, then add all working tree changes
-          execSync(`git read-tree HEAD`, { cwd: projectDir, encoding: 'utf-8', env: { ...process.env, GIT_INDEX_FILE: tmpIndex } });
-          execSync('git add -A', { cwd: projectDir, encoding: 'utf-8', env: { ...process.env, GIT_INDEX_FILE: tmpIndex } });
-          diff = execFileSync('git', ['diff', '--cached', '--', run.baselineRef], { cwd: projectDir, encoding: 'utf-8', maxBuffer: 1024 * 1024, env: { ...process.env, GIT_INDEX_FILE: tmpIndex } });
+          execFileSync('git', ['read-tree', 'HEAD'], { cwd: projectDir, encoding: 'utf-8', env: { ...process.env, GIT_INDEX_FILE: tmpIndex } });
+          execFileSync('git', ['add', '-A'], { cwd: projectDir, encoding: 'utf-8', env: { ...process.env, GIT_INDEX_FILE: tmpIndex } });
+          diff = execFileSync('git', ['diff', '--cached', run.baselineRef, '--'], { cwd: projectDir, encoding: 'utf-8', maxBuffer: 1024 * 1024, env: { ...process.env, GIT_INDEX_FILE: tmpIndex } });
         } finally {
           try { unlinkSync(tmpIndex); } catch { /* already cleaned */ }
         }
@@ -442,7 +442,7 @@ export async function buildReviewCommand(buildId: string): Promise<void> {
 
     const output = {
       buildId,
-      review: result.text,
+      review: result.text.slice(0, 2000),
       verdict: approved ? 'approved' : 'needs_revision',
       sessionId: result.sessionId,
       resumed: existingSession ? result.sessionId === existingSession : false,

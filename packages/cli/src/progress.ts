@@ -3,7 +3,8 @@
 import type { ProgressCallbacks } from '@codemoot/core';
 import chalk from 'chalk';
 
-const THROTTLE_MS = 3_000;
+const THROTTLE_MS = 30_000;
+const MAX_CARRY_OVER = 64 * 1024; // 64KB — prevent unbounded buffer growth
 
 /**
  * Create progress callbacks for CLI commands that show real-time
@@ -14,6 +15,7 @@ export function createProgressCallbacks(label = 'codex'): ProgressCallbacks {
   let lastActivityAt = 0;
   let lastMessage = '';
   let carryOver = '';
+  let droppedEvents = 0;
 
   function printActivity(msg: string) {
     const now = Date.now();
@@ -24,9 +26,22 @@ export function createProgressCallbacks(label = 'codex'): ProgressCallbacks {
     console.error(chalk.dim(`  [${label}] ${msg}`));
   }
 
+  function parseLine(line: string) {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    try {
+      const event = JSON.parse(trimmed);
+      formatEvent(event, printActivity);
+    } catch {
+      droppedEvents++;
+    }
+  }
+
   return {
     onSpawn(pid: number, command: string) {
-      console.error(chalk.dim(`  [${label}] Started (PID: ${pid}, cmd: ${command})`));
+      // Redact args to avoid leaking tokens/credentials in logs — keep only basename
+      const exe = command.replace(/^"([^"]+)".*/, '$1').split(/[\s/\\]+/).pop() ?? command;
+      console.error(chalk.dim(`  [${label}] Started (PID: ${pid}, cmd: ${exe})`));
     },
 
     onStderr(_chunk: string) {
@@ -40,21 +55,32 @@ export function createProgressCallbacks(label = 'codex'): ProgressCallbacks {
       // Last element may be incomplete — carry it over to next chunk
       carryOver = lines.pop() ?? '';
 
+      // Cap carryOver to prevent unbounded memory growth on malformed streams
+      if (carryOver.length > MAX_CARRY_OVER) {
+        carryOver = '';
+        droppedEvents++;
+      }
+
       for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const event = JSON.parse(trimmed);
-          formatEvent(event, printActivity);
-        } catch {
-          // Not JSON — skip
-        }
+        parseLine(line);
+      }
+    },
+
+    onClose() {
+      // Flush remaining carryOver on stream end (final event without trailing newline)
+      if (carryOver.trim()) {
+        parseLine(carryOver);
+        carryOver = '';
+      }
+      if (droppedEvents > 0) {
+        console.error(chalk.dim(`  [${label}] ${droppedEvents} event(s) dropped (parse errors or buffer overflow)`));
+        droppedEvents = 0;
       }
     },
 
     onHeartbeat(elapsedSec: number) {
-      // Only show heartbeats every 30s to reduce noise
-      if (elapsedSec % 30 === 0) {
+      // Show heartbeats every 60s to reduce noise
+      if (elapsedSec % 60 === 0) {
         printActivity(`${elapsedSec}s elapsed...`);
       }
     },
@@ -89,17 +115,6 @@ function formatEvent(
         print(`${name}: ${pathMatch[1]}`);
       } else {
         print(`${name}${args ? `: ${args.slice(0, 60)}` : ''}`);
-      }
-      return;
-    }
-
-    if (item.type === 'agent_message') {
-      const text = String(item.text ?? '');
-      // Show first meaningful line of the response
-      const firstLine = text.split('\n').find(l => l.trim().length > 10);
-      if (firstLine) {
-        const preview = firstLine.trim().slice(0, 80);
-        print(`Response: ${preview}${firstLine.trim().length > 80 ? '...' : ''}`);
       }
       return;
     }

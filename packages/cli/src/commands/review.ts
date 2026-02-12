@@ -313,7 +313,7 @@ export async function reviewCommand(fileOrGlob: string | undefined, options: Rev
       findings,
       verdict: verdictMatch ? verdictMatch[1].toLowerCase() : 'unknown',
       score: scoreMatch ? Number.parseInt(scoreMatch[1], 10) : null,
-      review: result.text,
+      review: result.text.slice(0, 2000),
       sessionId: session.id,
       codexThreadId: result.sessionId,
       resumed: sessionThreadId ? result.sessionId === sessionThreadId : false,
