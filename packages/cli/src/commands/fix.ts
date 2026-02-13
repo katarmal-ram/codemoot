@@ -250,11 +250,31 @@ export async function fixCommand(fileOrGlob: string, options: FixOptions): Promi
     const progress = createProgressCallbacks('fix-review');
 
     console.error(chalk.dim('  GPT reviewing...'));
-    const reviewResult = await (adapter as CliAdapter).callWithResume(reviewPrompt, {
-      sessionId: threadId,
-      timeout: timeoutMs,
-      ...progress,
-    });
+    let reviewResult;
+    try {
+      reviewResult = await (adapter as CliAdapter).callWithResume(reviewPrompt, {
+        sessionId: threadId,
+        timeout: timeoutMs,
+        ...progress,
+      });
+    } catch (err) {
+      // If the call fails entirely (stale thread, codex crash, etc.), clear the
+      // stored thread ID so subsequent runs don't keep hitting the same dead thread.
+      if (threadId) {
+        console.error(chalk.yellow('  Clearing stale codex thread ID after failure.'));
+        sessionMgr.updateThreadId(session.id, null);
+        threadId = undefined;
+      }
+      throw err;
+    }
+
+    // Detect resume failure: callWithResume falls back to fresh exec internally,
+    // returning a NEW sessionId. Clear stale thread so future rounds use the new one.
+    const resumed = threadId && reviewResult.sessionId === threadId;
+    if (threadId && !resumed) {
+      threadId = undefined;
+      sessionMgr.updateThreadId(session.id, null);
+    }
 
     if (reviewResult.sessionId) {
       threadId = reviewResult.sessionId;

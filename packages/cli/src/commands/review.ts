@@ -265,11 +265,26 @@ export async function reviewCommand(fileOrGlob: string | undefined, options: Rev
     const timeoutMs = (options.timeout ?? 600) * 1000;
     const progress = createProgressCallbacks('review');
 
-    const result = await (adapter as CliAdapter).callWithResume(prompt, {
-      sessionId: sessionThreadId,
-      timeout: timeoutMs,
-      ...progress,
-    });
+    let result;
+    try {
+      result = await (adapter as CliAdapter).callWithResume(prompt, {
+        sessionId: sessionThreadId,
+        timeout: timeoutMs,
+        ...progress,
+      });
+    } catch (err) {
+      // Clear stale thread ID so subsequent runs don't keep hitting a dead thread
+      if (sessionThreadId) {
+        sessionMgr.updateThreadId(session.id, null);
+      }
+      throw err;
+    }
+
+    // Detect resume failure — callWithResume falls back to fresh exec internally,
+    // returning a NEW sessionId. Clear stale stored thread on mismatch.
+    if (sessionThreadId && result.sessionId !== sessionThreadId) {
+      sessionMgr.updateThreadId(session.id, null);
+    }
 
     // Update session
     if (result.sessionId) {
