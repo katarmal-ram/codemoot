@@ -356,16 +356,8 @@ export async function buildReviewCommand(buildId: string): Promise<void> {
     // Resolve unified session
     const sessionMgr = new SessionManager(db);
     const session = sessionMgr.resolveActive('build-review');
-    const overflowCheck = sessionMgr.preCallOverflowCheck(session.id);
-    if (overflowCheck.rolled) {
-      console.error(chalk.yellow(`  ${overflowCheck.message}`));
-    }
-
-    // After rollover, re-read session to get cleared thread ID
     const currentSession = sessionMgr.get(session.id);
-    const existingSession = overflowCheck.rolled
-      ? undefined  // Don't reuse old thread after rollover
-      : (currentSession?.codexThreadId ?? run.reviewCodexSession ?? undefined);
+    const existingSession = currentSession?.codexThreadId ?? run.reviewCodexSession ?? undefined;
 
     const prompt = buildHandoffEnvelope({
       command: 'build-review',
@@ -423,7 +415,7 @@ export async function buildReviewCommand(buildId: string): Promise<void> {
     buildStore.updateWithEvent(
       buildId,
       {
-        reviewCodexSession: result.sessionId ?? existingSession,
+        reviewCodexSession: result.sessionId ?? undefined,
         reviewCycles: run.reviewCycles + 1,
       },
       {

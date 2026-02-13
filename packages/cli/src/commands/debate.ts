@@ -16,7 +16,8 @@ import {
   preflightTokenCheck,
 } from '@codemoot/core';
 import chalk from 'chalk';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { createProgressCallbacks } from '../progress.js';
 import { getDbPath } from '../utils.js';
@@ -77,11 +78,63 @@ export async function debateStartCommand(topic: string, options: StartOptions): 
 
 // ── codemoot debate turn ──
 
+const DEFAULT_RESPONSE_CAP = 16_384;
+const MAX_RESPONSE_CAP = 24_576; // Hard ceiling — JSON + escaping + stderr must fit under Bash tool's 30K limit // 16KB — safe under Bash tool's 30K char limit after JSON escaping
+
 interface TurnOptions {
   round?: number;
   timeout?: number;
   output?: string;
   force?: boolean;
+  quiet?: boolean;
+  responseCap?: number;
+}
+
+/** Build the response fields for debate turn JSON output. Auto-writes file on truncation. */
+function buildResponseOutput(
+  debateId: string,
+  round: number,
+  responseText: string | null | undefined,
+  cap: number,
+  explicitOutput: string | undefined,
+): { response: string; responseTruncated: boolean; responseBytes: number; responseCap: number; responseFile: string | undefined } {
+  const text = responseText ?? '';
+  const byteLen = Buffer.byteLength(text, 'utf-8');
+  const truncated = byteLen > cap;
+  let responseFile: string | undefined;
+
+  // Auto-write to file when truncated and no explicit --output was already written
+  if (truncated && !explicitOutput) {
+    const dir = join(process.cwd(), '.codemoot', 'debates');
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    responseFile = join(dir, `${debateId}-r${round}.txt`);
+    writeFileSync(responseFile, text, { encoding: 'utf-8', mode: 0o600 });
+  } else if (explicitOutput && text.length > 0) {
+    // Only report explicitOutput as responseFile when we actually wrote content
+    responseFile = explicitOutput;
+  }
+
+  // Truncate by bytes: find the char index where UTF-8 bytes exceed cap
+  let sliced = text;
+  if (truncated) {
+    // Binary search for the safe char boundary
+    let lo = 0;
+    let hi = text.length;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >>> 1;
+      if (Buffer.byteLength(text.slice(0, mid), 'utf-8') <= cap) lo = mid;
+      else hi = mid - 1;
+    }
+    sliced = text.slice(0, lo);
+  }
+
+  return {
+    response: sliced,
+    responseTruncated: truncated,
+    responseBytes: byteLen,
+    responseCap: cap,
+    responseFile,
+  };
 }
 
 export async function debateTurnCommand(
@@ -122,6 +175,11 @@ export async function debateTurnCommand(
 
     const rawRound = options.round ?? (criticRow.round + 1);
     const newRound = Number.isFinite(rawRound) && rawRound > 0 ? rawRound : criticRow.round + 1;
+    const responseCap = Math.min(
+      options.responseCap && options.responseCap > 0 ? options.responseCap : DEFAULT_RESPONSE_CAP,
+      MAX_RESPONSE_CAP,
+    );
+    const quiet = options.quiet ?? false;
 
     // Load persisted state for maxRounds and default timeout
     const proposerStateForLimit = store.loadState(debateId, 'proposer');
@@ -154,14 +212,13 @@ export async function debateTurnCommand(
       // Return cached response
       if (options.output && existing.responseText) {
         writeFileSync(options.output, existing.responseText, 'utf-8');
-        console.error(chalk.dim(`Full response written to ${options.output}`));
+        if (!quiet) console.error(chalk.dim(`Full response written to ${options.output}`));
       }
+      const responseFields = buildResponseOutput(debateId, newRound, existing.responseText, responseCap, options.output);
       const output = {
         debateId,
         round: newRound,
-        response: existing.responseText?.slice(0, 2000) ?? '',
-        responseTruncated: (existing.responseText?.length ?? 0) > 2000,
-        responseFile: options.output ?? undefined,
+        ...responseFields,
         sessionId: existing.sessionId,
         resumed: false,
         cached: true,
@@ -176,7 +233,7 @@ export async function debateTurnCommand(
     // Recover stale running rows for THIS debate only (use timeout + buffer to avoid killing active turns)
     const staleThreshold = timeout + 60_000; // turn timeout + 1 min buffer
     const recovered = msgStore.recoverStaleForDebate(debateId, staleThreshold);
-    if (recovered > 0) {
+    if (recovered > 0 && !quiet) {
       console.error(chalk.yellow(`  Recovered ${recovered} stale message(s) from prior crash.`));
     }
 
@@ -207,14 +264,13 @@ export async function debateTurnCommand(
       if (recheckRow?.status === 'completed') {
         if (options.output && recheckRow.responseText) {
           writeFileSync(options.output, recheckRow.responseText, 'utf-8');
-          console.error(chalk.dim(`Full response written to ${options.output}`));
+          if (!quiet) console.error(chalk.dim(`Full response written to ${options.output}`));
         }
+        const recheckResponseFields = buildResponseOutput(debateId, newRound, recheckRow.responseText, responseCap, options.output);
         const output = {
           debateId,
           round: newRound,
-          response: recheckRow.responseText?.slice(0, 2000) ?? '',
-          responseTruncated: (recheckRow.responseText?.length ?? 0) > 2000,
-          responseFile: options.output ?? undefined,
+          ...recheckResponseFields,
           sessionId: recheckRow.sessionId,
           resumed: false,
           cached: true,
@@ -245,28 +301,33 @@ export async function debateTurnCommand(
       db.close();
       process.exit(1);
     } else if (preflight.shouldStop && options.force) {
-      console.error(chalk.yellow(`  Token budget at ${Math.round(preflight.utilizationRatio * 100)}% (${preflight.totalTokensUsed}/${maxContext}) — forced past budget limit.`));
+      if (!quiet) console.error(chalk.yellow(`  Token budget at ${Math.round(preflight.utilizationRatio * 100)}% (${preflight.totalTokensUsed}/${maxContext}) — forced past budget limit.`));
     } else if (preflight.shouldSummarize) {
-      console.error(chalk.yellow(`  Token budget at ${Math.round(preflight.utilizationRatio * 100)}%. Older rounds will be summarized on resume failure.`));
-    }
-
-    // Auto-rollover on session overflow
-    const overflowCheck = sessionMgr.preCallOverflowCheck(unifiedSession.id);
-    if (overflowCheck.rolled) {
-      console.error(chalk.yellow(`  ${overflowCheck.message}`));
-      console.error(chalk.yellow('  Warning: Session rolled over — previous conversation context has been lost.'));
-      sessionMgr.updateThreadId(unifiedSession.id, null);
-      existingSessionId = undefined; // Don't reuse old thread after rollover
+      if (!quiet) console.error(chalk.yellow(`  Token budget at ${Math.round(preflight.utilizationRatio * 100)}%. Older rounds will be summarized on resume failure.`));
     }
 
     try {
       // Call GPT via codex with session resume + progress feedback
       const progress = createProgressCallbacks('debate');
-      let result = await (adapter as CliAdapter).callWithResume(prompt, {
-        sessionId: existingSessionId,
-        timeout,
-        ...progress,
-      });
+      let result;
+      try {
+        result = await (adapter as CliAdapter).callWithResume(prompt, {
+          sessionId: existingSessionId,
+          timeout,
+          ...progress,
+        });
+      } catch (err) {
+        // Clear stale thread ID so subsequent turns don't keep hitting a dead thread
+        if (existingSessionId) {
+          sessionMgr.updateThreadId(unifiedSession.id, null);
+        }
+        throw err;
+      }
+
+      // Detect resume failure — clear stale thread on session ID mismatch
+      if (existingSessionId && result.sessionId !== existingSessionId) {
+        sessionMgr.updateThreadId(unifiedSession.id, null);
+      }
 
       // Detect resume outcome
       const resumed = attemptedResume && result.sessionId === existingSessionId;
@@ -274,7 +335,7 @@ export async function debateTurnCommand(
 
       // If resume failed, reconstruct context from stored history and retry
       if (resumeFailed && result.text.length < 50) {
-        console.error(chalk.yellow('  Resume failed with minimal response. Reconstructing from ledger...'));
+        if (!quiet) console.error(chalk.yellow('  Resume failed with minimal response. Reconstructing from ledger...'));
         const history = msgStore.getHistory(debateId);
         const reconstructed = buildReconstructionPrompt(history, prompt);
         result = await (adapter as CliAdapter).callWithResume(reconstructed, {
@@ -285,7 +346,7 @@ export async function debateTurnCommand(
 
       // Warn about possible codex output truncation
       if (result.text.length < 200 && (result.durationMs ?? 0) > 60_000) {
-        console.error(chalk.yellow(`  Warning: GPT response is only ${result.text.length} chars after ${Math.round((result.durationMs ?? 0) / 1000)}s — possible output truncation (codex may have spent its turn on tool calls).`));
+        if (!quiet) console.error(chalk.yellow(`  Warning: GPT response is only ${result.text.length} chars after ${Math.round((result.durationMs ?? 0) / 1000)}s — possible output truncation (codex may have spent its turn on tool calls).`));
       }
 
       // Parse verdict from response
@@ -334,7 +395,7 @@ export async function debateTurnCommand(
       store.upsert({
         debateId,
         role: 'critic',
-        codexSessionId: result.sessionId ?? existingSessionId,
+        codexSessionId: result.sessionId ?? undefined,
         round: newRound,
         status: 'active',
       });
@@ -353,15 +414,14 @@ export async function debateTurnCommand(
       // Write full response to file if --output specified
       if (options.output) {
         writeFileSync(options.output, result.text, 'utf-8');
-        console.error(chalk.dim(`Full response written to ${options.output}`));
+        if (!quiet) console.error(chalk.dim(`Full response written to ${options.output}`));
       }
       // Output JSON for the /debate skill to parse
+      const freshResponseFields = buildResponseOutput(debateId, newRound, result.text, responseCap, options.output);
       const output = {
         debateId,
         round: newRound,
-        response: result.text.slice(0, 2000),
-        responseTruncated: result.text.length > 2000,
-        responseFile: options.output ?? undefined,
+        ...freshResponseFields,
         sessionId: result.sessionId,
         resumed,
         cached: false,
@@ -370,15 +430,17 @@ export async function debateTurnCommand(
         durationMs: result.durationMs,
       };
       // Human-readable summary on stderr
-      const stanceColor = verdict.stance === 'SUPPORT' ? chalk.green :
-        verdict.stance === 'OPPOSE' ? chalk.red : chalk.yellow;
-      console.error(stanceColor(`\nRound ${newRound} — Stance: ${verdict.stance}`));
-      // Show first 3 meaningful lines of the response
-      const previewLines = result.text.split('\n').filter(l => l.trim().length > 10).slice(0, 3);
-      for (const line of previewLines) {
-        console.error(chalk.dim(`  ${line.trim().slice(0, 120)}`));
+      if (!quiet) {
+        const stanceColor = verdict.stance === 'SUPPORT' ? chalk.green :
+          verdict.stance === 'OPPOSE' ? chalk.red : chalk.yellow;
+        console.error(stanceColor(`\nRound ${newRound} — Stance: ${verdict.stance}`));
+        // Show first 3 meaningful lines of the response
+        const previewLines = result.text.split('\n').filter(l => l.trim().length > 10).slice(0, 3);
+        for (const line of previewLines) {
+          console.error(chalk.dim(`  ${line.trim().slice(0, 120)}`));
+        }
+        console.error(chalk.dim(`Duration: ${(result.durationMs / 1000).toFixed(1)}s | Output: ${result.usage?.outputTokens ?? '?'} tokens | Input: ${result.usage?.inputTokens ?? '?'} (includes sandbox) | Resumed: ${resumed}`));
       }
-      console.error(chalk.dim(`Duration: ${(result.durationMs / 1000).toFixed(1)}s | Output: ${result.usage?.outputTokens ?? '?'} tokens | Input: ${result.usage?.inputTokens ?? '?'} (includes sandbox) | Resumed: ${resumed}`));
 
       console.log(JSON.stringify(output, null, 2));
     } catch (error) {

@@ -125,10 +125,6 @@ export async function cleanupCommand(path: string, options: CleanupOptions): Pro
     // Resolve unified session
     const sessionMgr = new SessionManager(db);
     const session = sessionMgr.resolveActive('cleanup');
-    const overflowCheck = sessionMgr.preCallOverflowCheck(session.id);
-    if (overflowCheck.rolled) {
-      console.error(chalk.yellow(`  ${overflowCheck.message}`));
-    }
     const currentSession = sessionMgr.get(session.id);
     const sessionThreadId = currentSession?.codexThreadId ?? undefined;
 

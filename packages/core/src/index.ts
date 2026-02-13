@@ -2,7 +2,7 @@
 // Sprint 1: Core engine + SQLite memory + model abstraction
 // Sprint 2: CLI-first hybrid + MCP types + security + cancellation
 
-export const VERSION = '0.2.13';
+export const VERSION = '0.2.14';
 
 // Type definitions
 export type {
@@ -179,7 +179,7 @@ export {
   hashContent,
   hashConfig,
 } from './memory/index.js';
-export type { CostSummary, DebateTurnRow, DebateTurnStatus, DebateMessageRow, MessageStatus, ParsedVerdict, UnifiedSession, SessionEvent, SessionOverflowStatus, CacheEntry } from './memory/index.js';
+export type { CostSummary, DebateTurnRow, DebateTurnStatus, DebateMessageRow, MessageStatus, ParsedVerdict, UnifiedSession, SessionEvent, CacheEntry } from './memory/index.js';
 
 // Model Abstraction (CLI-only)
 export {

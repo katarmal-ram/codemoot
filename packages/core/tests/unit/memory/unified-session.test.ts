@@ -69,14 +69,12 @@ describe('SessionManager', () => {
       expect(session?.codexThreadId).toBe('thread_abc');
     });
 
-    it('rolloverThread clears thread but preserves cumulative tokens', () => {
+    it('clears thread ID when null is passed', () => {
       const id = mgr.create();
-      mgr.updateThreadId(id, 'thread_old');
-      mgr.addTokenUsage(id, 50000);
-      mgr.rolloverThread(id);
+      mgr.updateThreadId(id, 'thread_abc');
+      mgr.updateThreadId(id, null);
       const session = mgr.get(id);
       expect(session?.codexThreadId).toBeNull();
-      expect(session?.tokenUsage).toBe(50000); // cumulative preserved for cost tracking
     });
   });
 
@@ -124,40 +122,6 @@ describe('SessionManager', () => {
       const id = mgr.create();
       const session = mgr.get(id);
       expect(session?.maxContext).toBe(400_000);
-    });
-  });
-
-  describe('overflow status', () => {
-    it('no warning below 75%', () => {
-      const id = mgr.create();
-      mgr.recordEvent({ sessionId: id, command: 'test', usageJson: JSON.stringify({ input_tokens: 200_000 }) });
-      const status = mgr.getOverflowStatus(id);
-      expect(status.lastTurnInputTokens).toBe(200_000);
-      expect(status.shouldWarn).toBe(false);
-      expect(status.shouldReconstruct).toBe(false);
-    });
-
-    it('warns above 75%', () => {
-      const id = mgr.create();
-      // 310K / 400K = 77.5%
-      mgr.recordEvent({ sessionId: id, command: 'test', usageJson: JSON.stringify({ input_tokens: 310_000 }) });
-      const status = mgr.getOverflowStatus(id);
-      expect(status.shouldWarn).toBe(true);
-      expect(status.shouldReconstruct).toBe(false);
-    });
-
-    it('reconstructs above 85%', () => {
-      const id = mgr.create();
-      // 350K / 400K = 87.5%
-      mgr.recordEvent({ sessionId: id, command: 'test', usageJson: JSON.stringify({ input_tokens: 350_000 }) });
-      const status = mgr.getOverflowStatus(id);
-      expect(status.shouldWarn).toBe(true);
-      expect(status.shouldReconstruct).toBe(true);
-    });
-
-    it('returns safe defaults for nonexistent session', () => {
-      const status = mgr.getOverflowStatus('nope');
-      expect(status.shouldWarn).toBe(false);
     });
   });
 

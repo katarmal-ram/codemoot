@@ -178,6 +178,8 @@ debate
   .option('--timeout <seconds>', 'Timeout in seconds', (v: string) => Number.parseInt(v, 10))
   .option('--output <file>', 'Write full untruncated response to file')
   .option('--force', 'Continue past token budget limit', false)
+  .option('--quiet', 'Suppress non-error stderr output', false)
+  .option('--response-cap <bytes>', 'Max response bytes in JSON output (default: 16384)', (v: string) => Number.parseInt(v, 10))
   .action(debateTurnCommand);
 
 debate
@@ -187,6 +189,8 @@ debate
   .option('--timeout <seconds>', 'Timeout in seconds', (v: string) => Number.parseInt(v, 10))
   .option('--output <file>', 'Write full untruncated response to file')
   .option('--force', 'Continue past token budget limit', false)
+  .option('--quiet', 'Suppress non-error stderr output', false)
+  .option('--response-cap <bytes>', 'Max response bytes in JSON output (default: 16384)', (v: string) => Number.parseInt(v, 10))
   .action(debateNextCommand);
 
 debate

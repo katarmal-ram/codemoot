@@ -106,12 +106,6 @@ export async function reviewCommand(fileOrGlob: string | undefined, options: Rev
       process.exit(1);
     }
 
-    // Check overflow — auto-rollover if needed
-    const overflowCheck = sessionMgr.preCallOverflowCheck(session.id);
-    if (overflowCheck.rolled) {
-      console.error(chalk.yellow(`  ${overflowCheck.message}`));
-    }
-
     // ── Resolve preset (overrides focus/timeout if set) ──
     const preset = options.preset ? getReviewPreset(options.preset) : undefined;
     if (options.preset && !preset) {

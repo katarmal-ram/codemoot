@@ -103,15 +103,8 @@ export async function planReviewCommand(planFile: string, options: ReviewOptions
     const sessionMgr = new SessionManager(db);
     const session = sessionMgr.resolveActive('plan-review');
 
-    const overflowCheck = sessionMgr.preCallOverflowCheck(session.id);
-    if (overflowCheck.rolled) {
-      console.error(chalk.yellow(`  ${overflowCheck.message}`));
-    }
-
     const currentSession = sessionMgr.get(session.id);
-    const threadId = overflowCheck.rolled
-      ? undefined
-      : (currentSession?.codexThreadId ?? undefined);
+    const threadId = currentSession?.codexThreadId ?? undefined;
 
     // Build review prompt — send the plan to codex for structured review
     const phaseContext = options.phase ? `\nThis is Phase ${options.phase} of a multi-phase plan.` : '';

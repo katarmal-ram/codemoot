@@ -30,18 +30,6 @@ export interface SessionEvent {
   createdAt: number;
 }
 
-export interface SessionOverflowStatus {
-  /** Cumulative tokens (for cost tracking). */
-  cumulativeTokens: number;
-  /** Latest turn's input_tokens (best proxy for current context fullness). */
-  lastTurnInputTokens: number;
-  maxContext: number;
-  /** Based on lastTurnInputTokens / maxContext. */
-  utilizationRatio: number;
-  shouldWarn: boolean;      // > 75%
-  shouldReconstruct: boolean; // > 85%
-}
-
 export class SessionManager {
   constructor(private db: Database.Database) {}
 
@@ -82,8 +70,8 @@ export class SessionManager {
     return this.get(id) as UnifiedSession;
   }
 
-  /** Update the codex thread ID for a session (after first GPT call). */
-  updateThreadId(sessionId: string, threadId: string): void {
+  /** Update the codex thread ID for a session. Pass null to clear. */
+  updateThreadId(sessionId: string, threadId: string | null): void {
     this.db
       .prepare(
         'UPDATE codemoot_sessions SET codex_thread_id = ?, updated_at = ? WHERE id = ?',
@@ -146,57 +134,6 @@ export class SessionManager {
     params.push(limit);
     const rows = this.db.prepare(sql).all(...params) as Record<string, unknown>[];
     return rows.map(r => this.toSession(r));
-  }
-
-  /** Get overflow status for a session. Uses latest turn's input_tokens as context fullness signal. */
-  getOverflowStatus(sessionId: string): SessionOverflowStatus {
-    const session = this.get(sessionId);
-    if (!session) {
-      return { cumulativeTokens: 0, lastTurnInputTokens: 0, maxContext: 400_000, utilizationRatio: 0, shouldWarn: false, shouldReconstruct: false };
-    }
-    // 128K was the old incorrect default; codex context is 400K
-    const maxCtx = (session.maxContext > 0 && session.maxContext !== 128_000) ? session.maxContext : 400_000;
-
-    // Get latest event's input_tokens as best proxy for current context size
-    const latestEvents = this.getEvents(sessionId, 1);
-    let lastTurnInput = 0;
-    if (latestEvents.length > 0 && latestEvents[0].usageJson) {
-      try {
-        const usage = JSON.parse(latestEvents[0].usageJson);
-        const raw = usage.inputTokens ?? usage.input_tokens ?? 0;
-        lastTurnInput = typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : 0;
-      } catch { /* malformed JSON */ }
-    }
-
-    const ratio = lastTurnInput / maxCtx;
-    return {
-      cumulativeTokens: session.tokenUsage,
-      lastTurnInputTokens: lastTurnInput,
-      maxContext: maxCtx,
-      utilizationRatio: ratio,
-      shouldWarn: ratio > 0.75,
-      shouldReconstruct: ratio > 0.85,
-    };
-  }
-
-  /** Pre-call check: auto-rollover if session context is over threshold. Call before every codex interaction. */
-  preCallOverflowCheck(sessionId: string, threshold = 0.85): { rolled: boolean; message?: string } {
-    const status = this.getOverflowStatus(sessionId);
-    if (status.utilizationRatio > threshold) {
-      this.rolloverThread(sessionId);
-      const pct = Math.round(status.utilizationRatio * 100);
-      return { rolled: true, message: `Session at ${pct}%. Rolling over to new thread.` };
-    }
-    return { rolled: false };
-  }
-
-  /** Roll over to a new codex thread (on context overflow). Returns new thread info. */
-  rolloverThread(sessionId: string): void {
-    this.db
-      .prepare(
-        'UPDATE codemoot_sessions SET codex_thread_id = NULL, updated_at = ? WHERE id = ?',
-      )
-      .run(Date.now(), sessionId);
   }
 
   // ── Session Events ──

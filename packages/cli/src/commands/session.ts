@@ -45,19 +45,13 @@ export async function sessionCurrentCommand(): Promise<void> {
     }
 
     const events = mgr.getEvents(session.id, 5);
-    const overflow = mgr.getOverflowStatus(session.id);
 
     console.log(JSON.stringify({
       sessionId: session.id,
       name: session.name,
       codexThreadId: session.codexThreadId,
       status: session.status,
-      tokenBudget: {
-        used: overflow.cumulativeTokens,
-        lastTurnInput: overflow.lastTurnInputTokens,
-        max: overflow.maxContext,
-        utilization: `${Math.round(overflow.utilizationRatio * 100)}%`,
-      },
+      tokenUsage: session.tokenUsage,
       recentEvents: events.map(e => ({
         command: e.command,
         subcommand: e.subcommand,
@@ -111,21 +105,13 @@ export async function sessionStatusCommand(sessionId: string): Promise<void> {
     }
 
     const events = mgr.getEvents(sessionId, 20);
-    const overflow = mgr.getOverflowStatus(sessionId);
 
     console.log(JSON.stringify({
       sessionId: session.id,
       name: session.name,
       codexThreadId: session.codexThreadId,
       status: session.status,
-      tokenBudget: {
-        used: overflow.cumulativeTokens,
-        lastTurnInput: overflow.lastTurnInputTokens,
-        max: overflow.maxContext,
-        utilization: `${Math.round(overflow.utilizationRatio * 100)}%`,
-        shouldWarn: overflow.shouldWarn,
-        shouldReconstruct: overflow.shouldReconstruct,
-      },
+      tokenUsage: session.tokenUsage,
       eventCount: events.length,
       events: events.map(e => ({
         command: e.command,

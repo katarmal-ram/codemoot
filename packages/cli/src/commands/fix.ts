@@ -187,12 +187,6 @@ export async function fixCommand(fileOrGlob: string, options: FixOptions): Promi
   );
 
   for (let round = 1; round <= options.maxRounds; round++) {
-    const overflowCheck = sessionMgr.preCallOverflowCheck(session.id);
-    if (overflowCheck.rolled) {
-      console.error(chalk.yellow(`  ${overflowCheck.message}`));
-      threadId = undefined;
-    }
-
     const roundStart = Date.now();
     console.error(chalk.dim(`\n── Round ${round}/${options.maxRounds} ──`));
 
