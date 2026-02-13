@@ -62,11 +62,12 @@ codemoot shipit --profile safe
 
 | Command | Description |
 |---------|-------------|
-| `codemoot debate start <topic>` | Start a Claude vs GPT debate |
-| `codemoot debate turn <id> <prompt>` | Send next prompt with session resume |
+| `codemoot debate start <topic>` | Start a Claude vs GPT debate (`--timeout` sets default) |
+| `codemoot debate turn <id> <prompt>` | Send next prompt (`--output <file>` for full response, `--force` to override budget) |
+| `codemoot debate next <id>` | Auto-continue debate (no prompt needed) |
 | `codemoot debate status <id>` | Show debate progress |
 | `codemoot debate list` | List all debates |
-| `codemoot debate history <id>` | Full message history |
+| `codemoot debate history <id>` | Full message history (`--output <file>` for untruncated export) |
 | `codemoot debate complete <id>` | Mark debate as done |
 
 ### Automation
@@ -211,12 +212,12 @@ git clone https://github.com/katarmal-ram/codemoot.git
 cd codemoot
 pnpm install
 pnpm build
-pnpm test         # 656 tests across 48 files
+pnpm test         # 628 tests across 47 files
 pnpm lint         # Biome linter
 pnpm typecheck    # TypeScript strict checks
 ```
 
-## Known Limitations (v0.2.0)
+## Known Limitations
 
 - Background job worker must be started manually (auto-spawn coming)
 - Watch mode enqueues jobs but requires worker process
