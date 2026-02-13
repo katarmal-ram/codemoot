@@ -148,11 +148,26 @@ Output format:
     const progress = createProgressCallbacks('plan-review');
 
     console.error(chalk.cyan('Sending plan to codex for review...'));
-    const result = await (adapter as CliAdapter).callWithResume(prompt, {
-      sessionId: threadId,
-      timeout: timeoutMs,
-      ...progress,
-    });
+    let result;
+    try {
+      result = await (adapter as CliAdapter).callWithResume(prompt, {
+        sessionId: threadId,
+        timeout: timeoutMs,
+        ...progress,
+      });
+    } catch (err) {
+      // Clear stale thread ID so subsequent runs don't keep hitting a dead thread
+      if (threadId) {
+        console.error(chalk.yellow('  Clearing stale codex thread ID after failure.'));
+        sessionMgr.updateThreadId(session.id, null);
+      }
+      throw err;
+    }
+
+    // Detect resume failure — clear stale thread on session ID mismatch
+    if (threadId && result.sessionId !== threadId) {
+      sessionMgr.updateThreadId(session.id, null);
+    }
 
     // Update session
     if (result.sessionId) {

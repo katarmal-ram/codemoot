@@ -2,7 +2,7 @@
 // Sprint 1: Core engine + SQLite memory + model abstraction
 // Sprint 2: CLI-first hybrid + MCP types + security + cancellation
 
-export const VERSION = '0.2.12';
+export const VERSION = '0.2.13';
 
 // Type definitions
 export type {

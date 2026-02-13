@@ -1,6 +1,6 @@
 {
   "name": "@codemoot/cli",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "description": "CLI for multi-model AI collaboration — review, debate, fix, watch, and ship code with Claude + GPT",
   "type": "module",
   "license": "MIT",

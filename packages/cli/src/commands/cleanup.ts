@@ -359,7 +359,21 @@ IMPORTANT KEY FORMAT: The key will be built as scope:file:symbol — use the SAM
 
   try {
     const progress = createProgressCallbacks('cleanup-scan');
-    const result = await adapter.callWithResume(prompt, { sessionId: sessionThreadId, timeout: timeoutSec * 1000, ...progress });
+    let result;
+    try {
+      result = await adapter.callWithResume(prompt, { sessionId: sessionThreadId, timeout: timeoutSec * 1000, ...progress });
+    } catch (err) {
+      // Clear stale thread ID so subsequent runs don't keep hitting a dead thread
+      if (sessionThreadId && sessionMgr && sessionId) {
+        sessionMgr.updateThreadId(sessionId, null);
+      }
+      throw err;
+    }
+
+    // Detect resume failure — clear stale thread on session ID mismatch
+    if (sessionThreadId && result.sessionId !== sessionThreadId && sessionMgr && sessionId) {
+      sessionMgr.updateThreadId(sessionId, null);
+    }
 
     // Update unified session
     if (sessionMgr && sessionId) {

@@ -375,11 +375,26 @@ export async function buildReviewCommand(buildId: string): Promise<void> {
     });
 
     const progress = createProgressCallbacks('build-review');
-    const result = await (adapter as InstanceType<typeof CliAdapterClass>).callWithResume(prompt, {
-      sessionId: existingSession,
-      timeout: 600_000,
-      ...progress,
-    });
+    let result;
+    try {
+      result = await (adapter as InstanceType<typeof CliAdapterClass>).callWithResume(prompt, {
+        sessionId: existingSession,
+        timeout: 600_000,
+        ...progress,
+      });
+    } catch (err) {
+      // Clear stale thread ID so subsequent runs don't keep hitting a dead thread
+      if (existingSession) {
+        console.error(chalk.yellow('  Clearing stale codex thread ID after failure.'));
+        sessionMgr.updateThreadId(session.id, null);
+      }
+      throw err;
+    }
+
+    // Detect resume failure — clear stale thread on session ID mismatch
+    if (existingSession && result.sessionId !== existingSession) {
+      sessionMgr.updateThreadId(session.id, null);
+    }
 
     // Update unified session
     if (result.sessionId) {
